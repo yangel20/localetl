@@ -49,7 +49,8 @@
       "type": "number",
       "minimum": 0,
       "maximum": 1,
-      "default": 1
+      "default": 1,
+      "description": "Maximum rejected_count / extracted_count before the run fails and nothing is published. Rows removed by deduplicate or drop_null_rows are not rejections; they count in the denominator only."
     },
     "target": {
       "$ref": "#/$defs/Target"

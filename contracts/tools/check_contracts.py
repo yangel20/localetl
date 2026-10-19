@@ -145,6 +145,19 @@ before = len(failures)
 walk(spec, "openapi"); walk(schema, "pipeline")
 check(len(failures) == before, "no unknown keywords in any schema object (openapi + pipeline)")
 
+# Q3 row outcome accounting: same five counters in the HTTP contract and the engine interface
+COUNTERS = ["extracted_count", "loaded_count", "rejected_count", "duplicate_dropped_count", "null_dropped_count"]
+run_props = S["Run"]["properties"]
+check(all(c in run_props and c in S["Run"]["required"] for c in COUNTERS), "Run exposes all five Q3 row counters (required)")
+rr = arch.split("class RunResult:")[1].split("rejected_sample")[0]
+check(re.findall(r"^\s+(\w+): int", rr, re.M) == COUNTERS, "architecture RunResult counters == Run counters, same order")
+check("extracted_count = loaded_count + rejected_count + duplicate_dropped_count + null_dropped_count" in arch, "reconciliation identity stated in architecture")
+check("loaded_count" in S["MetricsSummary"]["properties"]["daily"]["items"]["required"], "MetricsSummary.daily uses loaded_count")
+legacy = re.compile(r"\brows_(read|rejected|loaded)\b|rows_loaded_total")
+for f in ("contracts/openapi.yaml", "contracts/pipeline.schema.json", "docs/architecture.md", "docs/requirements.md"):
+    hits = [i + 1 for i, line in enumerate((root / f).read_text().splitlines()) if legacy.search(line)]
+    check(not hits, f"no legacy row counter names in {f}" + (f" (lines {hits})" if hits else ""))
+
 print()
 print(f"{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)
