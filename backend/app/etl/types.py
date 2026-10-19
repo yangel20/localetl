@@ -70,6 +70,17 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True)
+class RunCounters:
+    """Cumulative row counters; same five fields, same order, as ``RunResult``."""
+
+    extracted_count: int
+    loaded_count: int  # 0 until the publish transaction commits
+    rejected_count: int
+    duplicate_dropped_count: int
+    null_dropped_count: int
+
+
+@dataclass(frozen=True)
 class StageEvent:
     stage: Stage
     status: EventStatus
@@ -77,6 +88,7 @@ class StageEvent:
     rows_out: int | None
     message: str | None
     at: datetime  # UTC
+    counters: RunCounters  # cumulative for the whole run after this event
 
 
 @dataclass(frozen=True)
@@ -98,9 +110,11 @@ class PublishedTable:
 
 @dataclass(frozen=True)
 class RunResult:
-    rows_read: int
-    rows_rejected: int
-    rows_loaded: int  # rows this run wrote to the published table
+    extracted_count: int  # data rows read from the source file (header excluded)
+    loaded_count: int  # rows committed to the published table by this run's publish
+    rejected_count: int  # rows failing parsing, casting or a validation rule (once per row)
+    duplicate_dropped_count: int  # rows removed by `deduplicate`
+    null_dropped_count: int  # rows removed by `drop_null_rows`
     rejected_sample: list[RejectedRow]  # first 1,000 rejections, row order
     published: PublishedTable
     stage_durations_ms: dict[Stage, int]

@@ -17,14 +17,19 @@ EXPECTED_EXPORTS = {
     "CsvFormatError", "CsvOptions", "CsvPreview", "CsvProfile", "EtlError",
     "EventStatus", "LoadError", "PipelineConfig", "PublishedTable",
     "RejectedRow", "RejectionLimitExceeded", "RejectionRule", "RunInterrupted",
-    "RunResult", "SourceMismatchError", "Stage", "StageEvent", "inspect_csv",
+    "RunCounters", "RunResult", "SourceMismatchError", "Stage", "StageEvent", "inspect_csv",
     "preview_csv", "run_pipeline", "validate_pipeline_config",
 }  # fmt: skip
 
 DATACLASSES = [
     etl.CsvOptions, etl.ColumnInfo, etl.CsvProfile, etl.CsvPreview,
     etl.ConfigErrorItem, etl.PipelineConfig, etl.StageEvent, etl.RejectedRow,
-    etl.PublishedTable, etl.RunResult,
+    etl.PublishedTable, etl.RunCounters, etl.RunResult,
+]  # fmt: skip
+
+COUNTER_FIELDS = [
+    "extracted_count", "loaded_count", "rejected_count",
+    "duplicate_dropped_count", "null_dropped_count",
 ]  # fmt: skip
 
 ETL_DIR = Path(etl.__file__).resolve().parent
@@ -63,13 +68,21 @@ def test_dataclass_fields() -> None:
     assert names(etl.CsvPreview) == ["columns", "rows", "sampled_rows"]
     assert names(etl.ConfigErrorItem) == ["path", "message"]
     assert names(etl.PipelineConfig)[0] == "raw"
-    assert names(etl.StageEvent) == ["stage", "status", "rows_in", "rows_out", "message", "at"]
+    assert names(etl.StageEvent) == [
+        "stage",
+        "status",
+        "rows_in",
+        "rows_out",
+        "message",
+        "at",
+        "counters",
+    ]
     assert names(etl.RejectedRow) == ["row_number", "column", "rule", "message", "value"]
     assert names(etl.PublishedTable) == ["schema", "table", "columns", "row_count"]
     assert names(etl.RunResult) == [
-        "rows_read", "rows_rejected", "rows_loaded", "rejected_sample", "published",
-        "stage_durations_ms",
+        *COUNTER_FIELDS, "rejected_sample", "published", "stage_durations_ms",
     ]  # fmt: skip
+    assert names(etl.RunCounters) == COUNTER_FIELDS
 
 
 def test_csv_options_defaults() -> None:
