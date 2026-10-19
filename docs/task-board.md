@@ -43,7 +43,7 @@ Wave 2 (worker, visualization, browser E2E) is listed at the end and is not assi
 
 | ID | Title | Depends on | Files to modify | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| ETL-01 | Public types, errors and interface stubs | W0 · *before review:* BE-01 | `backend/app/etl/__init__.py`, `types.py`, `errors.py`; `backend/tests/etl/test_public_api.py` | Every name in architecture §5 exported with exact signatures and full type hints (functions may raise `NotImplementedError`); dataclasses frozen; test asserts the export list; `mypy --strict backend/app/etl` passes; import-rule test (no FastAPI/`app.*` imports) | In progress: work finished at `6a87211`, rebased; cannot be submitted until BE-01 merges |
+| ETL-01 | Public types, errors and interface stubs | W0 · *before review:* BE-01 | `backend/app/etl/__init__.py`, `types.py`, `errors.py`; `backend/tests/etl/test_public_api.py` | Every name in architecture §5 exported with exact signatures and full type hints (functions may raise `NotImplementedError`); dataclasses frozen; test asserts the export list; `mypy --strict backend/app/etl` passes; import-rule test (no FastAPI/`app.*` imports) | **Eligible for formal review** (BE-01 merged): must rebase onto `main`, re-test via `pip install -e '.[dev]'`, then submit |
 | ETL-02 | CSV inspect and preview | ETL-01 | `backend/app/etl/extract.py`, `backend/tests/etl/test_extract.py` | `inspect_csv` / `preview_csv` per §5; all 4 encodings and 4 delimiters; `has_header=false` naming; type inference for all 6 `ColumnType`s; `CsvFormatError` for every REQ-04 case; chunked reading | Blocked |
 | ETL-03 | Config validation | ETL-01 | `backend/app/etl/config.py`, `backend/tests/etl/test_config.py` | Loads `contracts/pipeline.schema.json` from the path in §5; all examples in `contracts/examples/pipeline/` behave as labelled; each semantic rule in §6 has a passing and a failing test; errors collected with JSON Pointer paths | Blocked |
 | ETL-04 | Transform stage | ETL-03 | `backend/app/etl/transform.py`, `backend/tests/etl/test_transform.py` | Column select/rename; casting per §5 stage 2 with `type_cast`/`not_null` rejections; ordered registry with exactly the 7 schema ops (completeness test against the schema enum); `deduplicate` across chunks; no `eval`/`exec`/`DataFrame.query`/`DataFrame.eval` | Blocked |
@@ -55,8 +55,9 @@ Wave 2 (worker, visualization, browser E2E) is listed at the end and is not assi
 
 | ID | Title | Depends on | Files to modify | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| BE-01 | Project scaffold, settings, errors, health | W0 · *before review:* QA-01 | `backend/pyproject.toml`, `backend/app/__init__.py`, `backend/app/main.py`, `backend/app/core/{settings,db,errors}.py`, `backend/app/api/__init__.py`, `backend/app/api/health.py`, `backend/tests/conftest.py`, `backend/tests/api/test_health.py`, `backend/tests/api/test_errors.py` | pyproject declares exactly the libs in architecture §2 (others justified); `pip install -e '.[dev]'` works on Python 3.11; settings from env only; `/api/v1/health` reports `database: ok` against Postgres and `unavailable` when down; 422/404 bodies use contract `Error`; pytest + mypy pass | **In review** (`a2b98ba`, rebased); awaiting QA-06 gate |
-| BE-02 | Metadata models and migrations | BE-01, QA-01 | `backend/app/models/*.py`, `backend/alembic.ini`, `backend/migrations/**`, `backend/tests/models/test_migrations.py` | Tables, enum, indexes and FKs exactly per §7.1 (including schemas `staging`, `datasets`); `alembic upgrade head` / `downgrade base` on empty DB; tests prove both partial unique indexes reject a second running run and a second active run per pipeline | Blocked |
+| BE-01 | Project scaffold, settings, errors, health | W0 · *before review:* QA-01 | `backend/pyproject.toml`, `backend/app/__init__.py`, `backend/app/main.py`, `backend/app/core/{settings,db,errors}.py`, `backend/app/api/__init__.py`, `backend/app/api/health.py`, `backend/tests/conftest.py`, `backend/tests/api/test_health.py`, `backend/tests/api/test_errors.py` | pyproject declares exactly the libs in architecture §2 (others justified); `pip install -e '.[dev]'` works on Python 3.11; settings from env only; `/api/v1/health` reports `database: ok` against Postgres and `unavailable` when down; 422/404 bodies use contract `Error`; pytest + mypy pass | **Done**: merged `a174f4c` (branch `d45b8c6`) |
+| BE-01b | 405 → `method_not_allowed` (decision Q1) | BE-01, contract `b8c6c8f` | `backend/app/core/errors.py`, `backend/tests/api/test_errors.py` | HTTP 405 returns `Error` with `code: method_not_allowed` and the `Allow` header preserved; other unmatched 4xx unchanged; test for `DELETE /api/v1/health`; pytest, mypy, ruff pass | **Ready** |
+| BE-02 | Metadata models and migrations | BE-01, QA-01 | `backend/app/models/*.py`, `backend/alembic.ini`, `backend/migrations/**`, `backend/tests/models/test_migrations.py` | Tables, enum, indexes and FKs exactly per §7.1 (including schemas `staging`, `datasets`); `alembic upgrade head` / `downgrade base` on empty DB; tests prove both partial unique indexes reject a second running run and a second active run per pipeline | **Ready** (BE-01, QA-01 Done) |
 | BE-03 | Sources endpoints | BE-02, ETL-02 | `backend/app/api/sources.py`, `backend/app/schemas/sources.py`, `backend/tests/api/test_sources.py` | `POST/GET /sources`, `GET/DELETE /sources/{id}`, `GET /sources/{id}/preview` match the contract exactly; streamed upload with 413 before full write; server-generated path `sources/<id>.csv`; 415/422 cases; delete 409 when referenced; uses `app.etl` public names only | Blocked |
 | BE-04 | Pipelines endpoints | BE-03, ETL-03 | `backend/app/api/pipelines.py`, `backend/app/schemas/pipelines.py`, `backend/tests/api/test_pipelines.py` | CRUD + `POST /pipelines/validate` per contract; validation via `validate_pipeline_config(..., source_columns=...)` only; `config_version` increments on PUT; duplicate name 409; delete with active run 409; `last_run` populated | Blocked |
 | BE-05 | Runs endpoints | BE-04 | `backend/app/api/runs.py`, `backend/app/schemas/runs.py`, `backend/tests/api/test_runs.py` | `POST /pipelines/{id}/runs` returns 202 `queued` with snapshot, never executes; 409 on second active run; `GET /runs` filters + pagination; `/runs/{id}`, `/events`, `/rejections` per contract | Blocked |
@@ -79,8 +80,8 @@ Wave 2 (worker, visualization, browser E2E) is listed at the end and is not assi
 | QA-01 | Local dev stack | W0 | `docker-compose.yml`, `scripts/db/init.sql`, `scripts/dev-up.sh`, `scripts/README.md` | `docker compose up -d db` starts Postgres 16 on `127.0.0.1:5432` with healthcheck, creating `localetl` and `localetl_test` from `.env` values; data in a named volume; script waits for healthy | **Done** (`1595bd9`) |
 | QA-02 | Test plan and traceability | W0 | `docs/qa/test-plan.md` | Every REQ-xx mapped to tests by layer and ticket; suite commands; Wave 1 exit criteria | Ready |
 | QA-03 | Synthetic CSV fixtures | W0 | `tests/fixtures/csv/**`, `tests/fixtures/generate_large.py`, `tests/fixtures/README.md` | Clean orders file matching `orders_full.json`; empty; header-only; BOM; latin-1; `;` `\t` `\|`; ragged rows; duplicate headers; >500 columns; hostile column names; dirty values hitting every rule; large file generated, not committed | **In review** (`a3ff6f3`, rebased); orchestrator review pending |
-| QA-04 | CI workflow | QA-01, BE-01, FE-01 | `.github/workflows/ci.yml`, `scripts/test-all.sh` | Runs contract check, Redocly lint, backend pytest (Postgres service) + mypy, frontend test/lint/build; `scripts/test-all.sh` runs the same locally | Blocked |
-| QA-05 | API conformance harness | BE-01 · extended after each BE merge | `tests/integration/conftest.py`, `tests/integration/test_api_conformance.py` | Validates live responses (status + body) against `contracts/openapi.yaml` for every merged endpoint, including error bodies | Blocked |
+| QA-04 | CI workflow | QA-01, BE-01, FE-01 | `.github/workflows/ci.yml`, `scripts/test-all.sh` | Runs contract check, Redocly lint, backend pytest (Postgres service) + mypy, frontend test/lint/build; `scripts/test-all.sh` runs the same locally | Blocked (FE-01) |
+| QA-05 | API conformance harness | BE-01 · extended after each BE merge | `tests/integration/conftest.py`, `tests/integration/test_api_conformance.py` | Validates live responses (status + body) against `contracts/openapi.yaml` for every merged endpoint, including error bodies | **Ready** (BE-01 Done; covers `/health` and error bodies now) |
 | QA-06 | Review gate | each ticket In review | `docs/qa/reviews/<TICKET-ID>.md` | Per ticket: PASS/FAIL, suites run with counts, ownership check, CLAUDE.md rules check, defects with repro | Ongoing |
 | QA-07 | Wave 1 integration (exit gate) | ETL-07, BE-06, QA-03, QA-05 | `tests/integration/test_wave1_flow.py` | Via API: upload fixture → preview → create pipeline → validate → queue run (`queued`, 409 on second). Direct `run_pipeline` on the same snapshot: `replace` and `append` row counts in `datasets.*` match fixture expectations; failing pipeline publishes nothing; interrupted run drops staging | Blocked |
 
@@ -90,8 +91,8 @@ Wave 2 (worker, visualization, browser E2E) is listed at the end and is not assi
 
 | Agent | Can resume now with | Then |
 |---|---|---|
-| etl-engineer | **ETL-01** (submit after BE-01 merges) | ETL-03 → ETL-02 → ETL-04/ETL-05 → ETL-06 (needs QA-01) → ETL-07 |
-| backend-engineer | **BE-01** (submit after QA-01 merges) | BE-02 → BE-03 → BE-04 → BE-05 → BE-06 |
+| etl-engineer | **ETL-01**: rebase + submit now | ETL-03 → ETL-02 → ETL-04/ETL-05 → ETL-06 (needs QA-01) → ETL-07 |
+| backend-engineer | ~~BE-01~~ Done → **BE-01b**, then **BE-02** | BE-03 → BE-04 → BE-05 → BE-06 |
 | frontend-engineer | **FE-01** | FE-02 → FE-03 / FE-04 / FE-05 |
 | qa-engineer | **QA-01** first (unblocks DB work), then QA-03, QA-02 | QA-04, QA-05, QA-06 reviews, QA-07 |
 
@@ -123,28 +124,30 @@ WK-01 claim/heartbeat/recovery loop · WK-02 run execution and success/failure t
 | Ticket | Branch / commits | Merge | Reviewer | Verdict | Evidence | Follow-ups |
 |---|---|---|---|---|---|---|
 | QA-01 | `qa/QA-01-dev-stack` @ `61573e6` | `1595bd9` | orchestrator (QA cannot review its own ticket) | PASS | `docker compose config` valid; contract check 0 failures; with `POSTGRES_PORT=55432` the stack was healthy in 6.6 s; `localetl` and `localetl_test` reachable over TCP immediately after healthy; port bound to `127.0.0.1` only; named volume; review stack torn down afterwards | F1, F2 |
+| BE-01 | `be/BE-01-scaffold` @ `d45b8c6` (2 commits; identical code to `a2b98ba`) | **`a174f4c`** | qa-engineer (`docs/qa/reviews/BE-01.md`, `691a280`: PASS; first pass `53570a1`: changes requested, rebase only) + orchestrator | PASS | On the merged tree (`9009372`, identical to the committed `main` tree), fresh venv, Python 3.11.6, Postgres 16 on 55432: pytest 8 passed / 0 skipped (from `backend/` and repo root); mypy clean; ruff check + format clean; check_contracts 0 failures; live `/api/v1/health` → ok; unknown route → contract 404 | Q1 → BE-01b; F3 |
 
 | ID | Follow-up | Owner | Blocking? |
 |---|---|---|---|
 | F1 | **This machine runs Postgres.app 13 on `127.0.0.1:5432`**, so `scripts/dev-up.sh` fails with "address already in use" on defaults (verified). Fix locally: either quit Postgres.app, or create `.env` with `POSTGRES_PORT=55432` and change the port in `DATABASE_URL`/`TEST_DATABASE_URL` to 55432. A misconfigured client fails loudly (`role "localetl" does not exist`), not silently. | user / every agent | Yes, for any DB test on this machine |
+| F3 | `backend/pyproject.toml`: no upper bounds on `python-multipart`, `ruff`, `pandas-stubs`; no lockfile (fresh installs get the newest FastAPI/SQLAlchemy). Now orchestrator-owned; revisit with QA-04 CI | orchestrator | No |
 | F2 | Healthcheck uses socket `pg_isready`. During first-volume init the image's temporary server is socket-only, so `healthy` could precede `init.sql`. Not reproduced (window ≈ 0.3 s), but change to `pg_isready -h 127.0.0.1 ...` | qa-engineer (with QA-04) | No |
 
-## Agent status snapshot (2026-10-19 18:50 local)
+## Agent status snapshot (2026-10-19, updated after BE-01 merge)
 
 Verified from git and local session metadata. Test results are **agent-reported** until a reviewer re-runs them.
 
 | Agent | Worktree | Branch @ commit | Ticket | Rebased on `main` | Files outside owned paths | Agent-reported tests |
 |---|---|---|---|---|---|---|
-| backend-engineer | `agent-backend` | `be/BE-01-scaffold` @ `a2b98ba` | BE-01 | yes | none (14 files) | pytest 8 passed; mypy, ruff clean |
-| etl-engineer | `agent-etl` | `etl/ETL-01-public-types` @ `6a87211` | ETL-01 | yes | none (7 files) | pytest 17 passed; mypy --strict clean (temporary venv) |
+| backend-engineer | `agent-backend` | `be/BE-01-scaffold` @ `d45b8c6` | BE-01 → **merged `a174f4c`** | n/a | none (14 files) | verified by QA and orchestrator (see Review log) |
+| etl-engineer | `agent-etl` | `etl/ETL-01-public-types` @ `6a87211` | ETL-01 | **no** (needs rebase onto `b8c6c8f`+) | none (7 files) | pytest 17 passed; mypy --strict clean (temporary venv) |
 | frontend-engineer | `agent-frontend` | `fe/FE-01-scaffold` @ `41efb4b` | FE-01 | **no (3 behind)** | none (26 files) | vitest 7 passed; lint, build, tsc OK |
 | qa-engineer | `agent-qa` | `qa/QA-03-fixtures` @ `a3ff6f3` | QA-03 | yes | none (33 files, largest 12.5 KB) | pytest tests/fixtures 13 passed |
 
-## Open questions raised in agent reports (orchestrator decision needed)
+## Open questions raised in agent reports
 
-| ID | From | Question | Affects |
+| ID | From | Question | Affects / decision |
 |---|---|---|---|
-| Q1 | BE-01 | `Error.code` has no value for 405 and similar statuses; BE maps other 4xx to `validation_error` | contract (`openapi.yaml`) |
+| Q1 | BE-01 | `Error.code` has no value for 405 and similar statuses | **Decided 2026-10-19 (user approved):** add `method_not_allowed` for HTTP 405. Contract changed in `b8c6c8f`; implementation in BE-01b |
 | Q2 | BE-01 | Validation paths drop the `body`/`query` prefix; multipart field naming for BE-03 | BE-03 |
 | Q3 | QA-03 | Do rows dropped by `deduplicate` / `drop_null_rows` count as rejected? (QA assumed: no) | architecture §5, ETL-04, ETL-07, QA-07 |
 | Q4 | QA-03 | Behaviour for duplicate CSV headers and ragged rows is unspecified | architecture §5, ETL-02 |
