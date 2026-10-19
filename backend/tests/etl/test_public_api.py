@@ -90,7 +90,10 @@ def test_error_hierarchy() -> None:
 
 def _params(fn: object) -> list[tuple[str, str, bool]]:
     sig = inspect.signature(fn)  # type: ignore[arg-type]
-    return [(p.name, p.kind.name, p.default is not inspect.Parameter.empty) for p in sig.parameters.values()]
+    return [
+        (p.name, p.kind.name, p.default is not inspect.Parameter.empty)
+        for p in sig.parameters.values()
+    ]
 
 
 def test_function_signatures() -> None:
