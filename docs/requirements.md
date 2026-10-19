@@ -33,8 +33,9 @@ Requirement IDs (`REQ-xx`) are referenced by tickets in `docs/task-board.md` and
 | REQ-20 | Cleaning operations are chosen only from a fixed list: `trim_whitespace`, `change_case`, `replace_values`, `fill_null`, `drop_null_rows`, `deduplicate`, `round_number`. They run in the configured order. |
 | REQ-21 | Validation rules are chosen only from a fixed list: `not_null`, `unique`, `range`, `allowed_values`, `regex`, `length`. |
 | REQ-22 | Rows failing type casting or any validation rule are **rejected** with row number, column, rule and message. The pipeline chooses `reject_row` (continue without the row) or `fail_run` (stop the run). |
-| REQ-23 | A pipeline may set `max_rejected_ratio` (0–1); if exceeded the run fails and nothing is published. |
+| REQ-23 | A pipeline may set `max_rejected_ratio` (0–1); computed as rejected rows ÷ extracted rows; if exceeded the run fails and nothing is published. |
 | REQ-24 | User input is never executed as code. No `eval`, `exec`, `DataFrame.query`/`DataFrame.eval` on user strings, and no user-supplied Python. |
+| REQ-25 | Each extracted row has exactly one outcome: loaded, rejected (failed parsing, casting or a validation rule), duplicate-dropped (`deduplicate`) or null-dropped (`drop_null_rows`). Rows removed by cleaning operations are not rejections. For a succeeded run, extracted = loaded + rejected + duplicate-dropped + null-dropped, across all chunks. |
 
 ## 4. PostgreSQL loading
 
@@ -60,7 +61,7 @@ Requirement IDs (`REQ-xx`) are referenced by tickets in `docs/task-board.md` and
 | ID | Requirement |
 |---|---|
 | REQ-50 | Execution history: runs are listed newest first, filterable by pipeline and status, paginated. |
-| REQ-51 | Each run exposes rows read, rows rejected, rows loaded, duration, error message (if failed) and a paginated list of rejected rows (up to 1,000 stored per run). |
+| REQ-51 | Each run exposes extracted, loaded, rejected, duplicate-dropped and null-dropped row counts, duration, error message (if failed) and a paginated list of rejected rows (up to 1,000 stored per run). |
 | REQ-52 | A metrics summary exposes run counts by status, total rows loaded, average duration, and daily run counts for the last 30 days. |
 | REQ-53 | Published datasets are listed with row count, columns and last publish time; their rows can be previewed with pagination and single-column sort. |
 | REQ-54 | Each published dataset exposes a column profile (null count, distinct count, min/max for numeric and date columns, top 10 values) to drive basic charts. |

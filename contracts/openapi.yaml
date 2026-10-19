@@ -285,7 +285,7 @@ paths:
     get:
       tags: [runs]
       operationId: listRunRejections
-      summary: Rejected rows (at most 1,000 stored per run), ordered by row number
+      summary: Rejection entries (at most 1,000 stored per run), ordered by row number; a row failing several rules has several entries
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -649,9 +649,11 @@ components:
         - started_at
         - finished_at
         - duration_ms
-        - rows_read
-        - rows_rejected
-        - rows_loaded
+        - extracted_count
+        - loaded_count
+        - rejected_count
+        - duplicate_dropped_count
+        - null_dropped_count
         - dataset_id
         - error_message
       properties:
@@ -672,9 +674,30 @@ components:
         started_at: { type: [string, 'null'], format: date-time }
         finished_at: { type: [string, 'null'], format: date-time }
         duration_ms: { type: [integer, 'null'], minimum: 0 }
-        rows_read: { type: integer, minimum: 0 }
-        rows_rejected: { type: integer, minimum: 0 }
-        rows_loaded: { type: integer, minimum: 0 }
+        extracted_count:
+          type: integer
+          minimum: 0
+          description: |
+            Data rows read from the source file (header excluded). Each extracted row has exactly one outcome
+            (architecture §5, "Row outcome accounting"). When `status` is `succeeded`:
+            extracted_count = loaded_count + rejected_count + duplicate_dropped_count + null_dropped_count.
+            While a run is `running`, the counters are cumulative progress and are updated as stage events arrive.
+        loaded_count:
+          type: integer
+          minimum: 0
+          description: Rows committed to the published table by this run's publish transaction (for `append`, rows inserted by this run). Always 0 unless `status` is `succeeded`.
+        rejected_count:
+          type: integer
+          minimum: 0
+          description: 'Rows that failed parsing, casting, a nullable check or a validation rule. Counted once per row; `/rejections` may list several entries for one row.'
+        duplicate_dropped_count:
+          type: integer
+          minimum: 0
+          description: Rows removed by a `deduplicate` transformation. Not rejections.
+        null_dropped_count:
+          type: integer
+          minimum: 0
+          description: Rows removed by a `drop_null_rows` transformation. Not rejections.
         dataset_id:
           type: [string, 'null']
           format: uuid
@@ -799,7 +822,7 @@ components:
 
     MetricsSummary:
       type: object
-      required: [total_runs, runs_by_status, rows_loaded_total, avg_duration_ms, daily]
+      required: [total_runs, runs_by_status, loaded_count_total, avg_duration_ms, daily]
       properties:
         total_runs: { type: integer, minimum: 0 }
         runs_by_status:
@@ -812,17 +835,17 @@ components:
             failed: { type: integer, minimum: 0 }
             interrupted: { type: integer, minimum: 0 }
           additionalProperties: false
-        rows_loaded_total: { type: integer, minimum: 0 }
+        loaded_count_total: { type: integer, minimum: 0, description: Sum of `loaded_count` over succeeded runs. }
         avg_duration_ms: { type: [number, 'null'], minimum: 0, description: Over finished runs; null when none. }
         daily:
           type: array
           description: One entry per UTC day in the window, oldest first, including zero days.
           items:
             type: object
-            required: [date, succeeded, failed, interrupted, rows_loaded]
+            required: [date, succeeded, failed, interrupted, loaded_count]
             properties:
               date: { type: string, format: date }
               succeeded: { type: integer, minimum: 0 }
               failed: { type: integer, minimum: 0 }
               interrupted: { type: integer, minimum: 0 }
-              rows_loaded: { type: integer, minimum: 0 }
+              loaded_count: { type: integer, minimum: 0 }
