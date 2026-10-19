@@ -137,6 +137,14 @@ class PipelineConfig:              # parsed, validated form of pipeline.schema.j
     ...                            # typed fields are the ETL engineer's choice
 
 @dataclass(frozen=True)
+class RunCounters:                 # same five fields, same order, as RunResult and the HTTP Run
+    extracted_count: int
+    loaded_count: int              # 0 until the publish transaction commits
+    rejected_count: int
+    duplicate_dropped_count: int
+    null_dropped_count: int
+
+@dataclass(frozen=True)
 class StageEvent:
     stage: Stage
     status: EventStatus
@@ -144,6 +152,7 @@ class StageEvent:
     rows_out: int | None
     message: str | None
     at: datetime                   # UTC
+    counters: RunCounters          # cumulative for the whole run after this event
 
 @dataclass(frozen=True)
 class RejectedRow:
@@ -163,7 +172,7 @@ class PublishedTable:
 @dataclass(frozen=True)
 class RunResult:                   # row counters: see "Row outcome accounting" below
     extracted_count: int           # data rows read from the source file (header excluded)
-    loaded_count: int              # rows this run wrote to the published table
+    loaded_count: int              # rows committed to the published table by this run's publish transaction
     rejected_count: int            # rows that failed parsing, casting or a validation rule (counted once per row)
     duplicate_dropped_count: int   # rows removed by `deduplicate`
     null_dropped_count: int        # rows removed by `drop_null_rows`
@@ -213,7 +222,7 @@ Every extracted row ends in **exactly one** outcome. Rows intentionally removed 
 | Rejected | `rejected_count` | the row fails parsing (`parse_error`), casting (`type_cast`), a `nullable: false` check (`not_null`), or any rule in `validations` |
 | Duplicate-dropped | `duplicate_dropped_count` | a `deduplicate` operation removes the row |
 | Null-dropped | `null_dropped_count` | a `drop_null_rows` operation removes the row |
-| Loaded | `loaded_count` | the row is written to the published table |
+| Loaded | `loaded_count` | the row is committed to the published table by this run's publish transaction (for `append`, rows inserted by this run, not the table total; that is `PublishedTable.row_count`) |
 
 Rules:
 1. **First removal wins.** A row is classified by the first stage step that removes it, in pipeline order: extract → cast and `nullable` check → `transformations` in array order → `validations` → load. Example: with `nullable: false` and `drop_null_rows` on the same column, a null is **rejected** (`not_null`), because the nullable check runs before transformations.
@@ -221,11 +230,12 @@ Rules:
 3. **Reconciliation.** For every `succeeded` run:
    `extracted_count = loaded_count + rejected_count + duplicate_dropped_count + null_dropped_count`.
    `run_pipeline` asserts this before publishing and raises `EtlError` if it does not hold. The database enforces it with a CHECK constraint (§7.1).
-4. **Chunk invariant.** The identity holds after every completed chunk for the rows seen so far: `extracted_so_far = staged_so_far + rejected + duplicate_dropped + null_dropped`. At publish, `loaded_count` = rows staged.
+4. **Chunk invariant.** After every completed chunk, for the rows seen so far: `extracted_count = staged + rejected_count + duplicate_dropped_count + null_dropped_count`, where `staged` is the rows written to the staging table. `loaded_count` stays 0 until the publish transaction commits; it is then set to `staged`. If publish rolls back, `loaded_count` stays 0.
 5. **Across chunks.** `deduplicate` and `unique` keep the **first** occurrence across the whole file and act on later ones. A key is registered by the first row that *reaches* that step, even if that row is later rejected by a validation rule. Rows removed earlier (rejected at cast, or dropped by an earlier operation) never register keys.
 6. **Rejection ratio.** `max_rejected_ratio` compares `rejected_count / extracted_count`. Dropped rows count in the denominator only.
-7. **Unsuccessful runs.** For `failed` and `interrupted` runs, nothing is published, so `loaded_count = 0`. The other counters reflect the rows fully processed before the stop. The identity is not enforced.
+7. **Unsuccessful runs.** For `failed` and `interrupted` runs, nothing is published, so `loaded_count = 0`. The other counters are the `counters` of the last `StageEvent` emitted before the stop, i.e. rows fully processed (whole chunks). The identity is not enforced.
 8. Transform events report `rows_in`/`rows_out` per chunk. The difference equals the rows rejected at cast plus rows dropped by operations in that chunk.
+9. **Reporting.** Every `StageEvent` carries a cumulative `RunCounters` snapshot; `progress` events are emitted at least once per chunk. The final `publish`/`completed` event's counters equal the `RunResult` counters. Counters never decrease within a run.
 
 ### Stage semantics
 1. **extract**: `pandas.read_csv(..., dtype=str, keep_default_na=False, chunksize=chunk_rows)` with the given options. Empty strings become null. Malformed rows → `parse_error` rejection.
@@ -293,6 +303,10 @@ RETURNING id;
 A unique-violation on `one_running_run` means another run is active; the worker backs off and retries.
 
 **Recovery** at worker start, and every poll: `UPDATE runs SET status='interrupted', finished_at=now(), error_message='worker stopped unexpectedly' WHERE status='running' AND heartbeat_at < now() - :stale`.
+
+**Progress**: on every `StageEvent`, the worker inserts the `run_events` row and, in the same transaction, sets the five counters from `event.counters`, `current_stage` and `heartbeat_at = now()`. After a crash, the run therefore keeps the last persisted counters, and recovery only changes `status`, `finished_at` and `error_message` (`loaded_count` is already 0, because it only becomes non-zero at publish commit).
+
+**Failure** (one transaction): `status='failed'` or `'interrupted'`, `finished_at`, `error_message`; counters stay as last persisted from events; insert rejection entries received so far (≤ 1,000).
 
 **Success** (one transaction): set counters, `finished_at`, `status='succeeded'`, upsert the `datasets` registry row from `RunResult.published`, set `runs.dataset_id`, and insert `rejected_sample` into `run_rejections`.
 

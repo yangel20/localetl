@@ -681,10 +681,11 @@ components:
             Data rows read from the source file (header excluded). Each extracted row has exactly one outcome
             (architecture §5, "Row outcome accounting"). When `status` is `succeeded`:
             extracted_count = loaded_count + rejected_count + duplicate_dropped_count + null_dropped_count.
+            While a run is `running`, the counters are cumulative progress and are updated as stage events arrive.
         loaded_count:
           type: integer
           minimum: 0
-          description: Rows written to the published table. Always 0 unless `status` is `succeeded`.
+          description: Rows committed to the published table by this run's publish transaction (for `append`, rows inserted by this run). Always 0 unless `status` is `succeeded`.
         rejected_count:
           type: integer
           minimum: 0

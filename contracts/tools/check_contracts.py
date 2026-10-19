@@ -151,6 +151,9 @@ run_props = S["Run"]["properties"]
 check(all(c in run_props and c in S["Run"]["required"] for c in COUNTERS), "Run exposes all five Q3 row counters (required)")
 rr = arch.split("class RunResult:")[1].split("rejected_sample")[0]
 check(re.findall(r"^\s+(\w+): int", rr, re.M) == COUNTERS, "architecture RunResult counters == Run counters, same order")
+rc = arch.split("class RunCounters:")[1].split("@dataclass")[0]
+check(re.findall(r"^\s+(\w+): int", rc, re.M) == COUNTERS, "architecture RunCounters == Run counters, same order")
+check("counters: RunCounters" in arch.split("class StageEvent:")[1].split("@dataclass")[0], "StageEvent carries cumulative RunCounters")
 check("extracted_count = loaded_count + rejected_count + duplicate_dropped_count + null_dropped_count" in arch, "reconciliation identity stated in architecture")
 check("loaded_count" in S["MetricsSummary"]["properties"]["daily"]["items"]["required"], "MetricsSummary.daily uses loaded_count")
 legacy = re.compile(r"\brows_(read|rejected|loaded)\b|rows_loaded_total")
