@@ -11,6 +11,7 @@ info:
     - All IDs are UUIDs; all timestamps are RFC 3339 UTC strings.
     - Collections are paginated with `limit`/`offset` and return a `*Page` object.
     - Every non-2xx response uses the `Error` schema (FastAPI's default 422 body must be replaced).
+    - HTTP 405 (method not defined for a path) returns `Error` with `code` = `method_not_allowed`.
 security: []  # local single-user app; authentication is an MVP non-goal (docs/requirements.md section 8)
 servers:
   - url: http://127.0.0.1:8000/api/v1
@@ -468,7 +469,10 @@ components:
           properties:
             code:
               type: string
-              enum: [validation_error, not_found, conflict, payload_too_large, unsupported_media_type, internal_error]
+              enum: [validation_error, not_found, method_not_allowed, conflict, payload_too_large, unsupported_media_type, internal_error]
+              description: |
+                `method_not_allowed` is returned with HTTP 405 for any path whose method is not defined here
+                (added 2026-10-19, decision Q1). Other unmatched 4xx map to `validation_error`; 5xx to `internal_error`.
             message: { type: string }
             details:
               type: array
