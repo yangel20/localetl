@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "columns": [{ "source": "id", "name": "id", "type": "integer" }],
+  "target": { "table": "t", "mode": "replace" }
+}

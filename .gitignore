@@ -1,0 +1,32 @@
+# Claude Code worktrees live inside the repo; never commit them
+.claude/worktrees/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Uploaded user data and local ETL output
+data/
+uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# E2E artifacts
+playwright-report/
+test-results/
+
+# OS
+.DS_Store

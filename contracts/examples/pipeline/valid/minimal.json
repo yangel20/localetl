@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "columns": [
+    { "source": "id", "name": "id", "type": "integer" }
+  ],
+  "target": { "table": "minimal", "mode": "replace" }
+}

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "columns": [{ "source": "id", "name": "id", "type": "integer" }],
+  "transformations": [{ "op": "python", "code": "print('not allowed')" }],
+  "target": { "table": "t", "mode": "replace" }
+}

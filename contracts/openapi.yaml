@@ -1,0 +1,824 @@
+openapi: 3.1.0
+info:
+  title: LocalETL API
+  version: 1.0.0
+  description: |
+    HTTP contract between the LocalETL frontend and the FastAPI backend.
+    Source of truth: implementations must match paths, methods, status codes, field names and types exactly.
+    Pipeline configurations are defined by `pipeline.schema.json` and referenced, not duplicated.
+
+    Conventions:
+    - All IDs are UUIDs; all timestamps are RFC 3339 UTC strings.
+    - Collections are paginated with `limit`/`offset` and return a `*Page` object.
+    - Every non-2xx response uses the `Error` schema (FastAPI's default 422 body must be replaced).
+security: []  # local single-user app; authentication is an MVP non-goal (docs/requirements.md section 8)
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+tags:
+  - name: system
+  - name: sources
+  - name: pipelines
+  - name: runs
+  - name: datasets
+  - name: metrics
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Liveness and database connectivity
+      responses:
+        '200':
+          description: API is up. `database` reports connectivity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /sources:
+    post:
+      tags: [sources]
+      operationId: createSource
+      summary: Upload a CSV file as a new data source
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/SourceUpload' }
+      responses:
+        '201':
+          description: Stored, parsed and profiled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataSource' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    get:
+      tags: [sources]
+      operationId: listSources
+      summary: List data sources, newest first
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of data sources.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataSourcePage' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /sources/{source_id}:
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
+    get:
+      tags: [sources]
+      operationId: getSource
+      summary: Get a data source
+      responses:
+        '200':
+          description: The data source.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataSource' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [sources]
+      operationId: deleteSource
+      summary: Delete a data source and its stored file
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /sources/{source_id}/preview:
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
+    get:
+      tags: [sources]
+      operationId: previewSource
+      summary: First rows and inferred column types
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200':
+          description: Preview.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CsvPreview' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /pipelines:
+    post:
+      tags: [pipelines]
+      operationId: createPipeline
+      summary: Create a pipeline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PipelineCreate' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pipeline' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    get:
+      tags: [pipelines]
+      operationId: listPipelines
+      summary: List pipelines
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of pipelines, most recently updated first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelinePage' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /pipelines/validate:
+    post:
+      tags: [pipelines]
+      operationId: validatePipelineConfig
+      summary: Validate a config without saving it
+      description: Runs schema and semantic validation. When `source_id` is given, source column names are checked against that data source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PipelineValidateRequest' }
+      responses:
+        '200':
+          description: Validation result. An invalid config is still a 200 with `valid=false`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelineValidationResult' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /pipelines/{pipeline_id}:
+    parameters:
+      - $ref: '#/components/parameters/PipelineId'
+    get:
+      tags: [pipelines]
+      operationId: getPipeline
+      summary: Get a pipeline
+      responses:
+        '200':
+          description: The pipeline.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pipeline' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [pipelines]
+      operationId: updatePipeline
+      summary: Replace name, description, source and config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PipelineCreate' }
+      responses:
+        '200':
+          description: Updated; `config_version` incremented.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pipeline' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [pipelines]
+      operationId: deletePipeline
+      summary: Delete a pipeline. Run history is kept.
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /pipelines/{pipeline_id}/runs:
+    parameters:
+      - $ref: '#/components/parameters/PipelineId'
+    post:
+      tags: [runs]
+      operationId: createRun
+      summary: Queue a run of this pipeline
+      description: Snapshots the current config and returns immediately with status `queued`. The worker executes it.
+      responses:
+        '202':
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /runs:
+    get:
+      tags: [runs]
+      operationId: listRuns
+      summary: Execution history, newest first
+      parameters:
+        - name: pipeline_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RunStatus' }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of runs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunPage' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [runs]
+      operationId: getRun
+      summary: Get a run
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /runs/{run_id}/events:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [runs]
+      operationId: listRunEvents
+      summary: Stage events in chronological order (not paginated; bounded by stage count and chunk count)
+      responses:
+        '200':
+          description: Events.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RunEvent' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /runs/{run_id}/rejections:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      tags: [runs]
+      operationId: listRunRejections
+      summary: Rejected rows (at most 1,000 stored per run), ordered by row number
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of rejected rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RejectedRowPage' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /datasets:
+    get:
+      tags: [datasets]
+      operationId: listDatasets
+      summary: Published datasets, most recently published first
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Page of datasets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatasetPage' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /datasets/{dataset_id}:
+    parameters:
+      - $ref: '#/components/parameters/DatasetId'
+    get:
+      tags: [datasets]
+      operationId: getDataset
+      summary: Get a published dataset
+      responses:
+        '200':
+          description: The dataset.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dataset' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /datasets/{dataset_id}/rows:
+    parameters:
+      - $ref: '#/components/parameters/DatasetId'
+    get:
+      tags: [datasets]
+      operationId: listDatasetRows
+      summary: Paginated rows of a published dataset
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: sort
+          in: query
+          description: Column name to sort by; must be one of the dataset's columns.
+          schema: { $ref: '#/components/schemas/Identifier' }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: asc }
+      responses:
+        '200':
+          description: Page of rows.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatasetRowPage' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /datasets/{dataset_id}/profile:
+    parameters:
+      - $ref: '#/components/parameters/DatasetId'
+    get:
+      tags: [datasets]
+      operationId: getDatasetProfile
+      summary: Per-column statistics for charts
+      responses:
+        '200':
+          description: Profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatasetProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /metrics/summary:
+    get:
+      tags: [metrics]
+      operationId: getMetricsSummary
+      summary: Aggregate run metrics
+      parameters:
+        - name: days
+          in: query
+          description: Window for `daily` counts.
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        '200':
+          description: Summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MetricsSummary' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PipelineId:
+      name: pipeline_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DatasetId:
+      name: dataset_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    NotFound:
+      description: Resource does not exist. `code` = `not_found`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: |
+        State conflict. `code` = `conflict`. Used for: deleting a source referenced by a pipeline;
+        duplicate pipeline name; deleting a pipeline with a queued or running run;
+        creating a run while the pipeline already has a queued or running run.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Request or config failed validation. `code` = `validation_error`; `details` lists each failing path.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: Upload exceeds LOCALETL_MAX_UPLOAD_MB. `code` = `payload_too_large`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: File is not a CSV. `code` = `unsupported_media_type`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Identifier:
+      $ref: './pipeline.schema.json#/$defs/Identifier'
+    ColumnType:
+      $ref: './pipeline.schema.json#/$defs/ColumnType'
+    CsvOptions:
+      $ref: './pipeline.schema.json#/$defs/CsvOptions'
+    PipelineConfig:
+      $ref: './pipeline.schema.json'
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [validation_error, not_found, conflict, payload_too_large, unsupported_media_type, internal_error]
+            message: { type: string }
+            details:
+              type: array
+              items: { $ref: '#/components/schemas/ErrorDetail' }
+    ErrorDetail:
+      type: object
+      required: [path, message]
+      properties:
+        path:
+          type: string
+          description: JSON Pointer into the request (e.g. `/config/transformations/2/columns`), or a form field name.
+        message: { type: string }
+
+    Health:
+      type: object
+      required: [status, database]
+      properties:
+        status: { type: string, enum: [ok] }
+        database: { type: string, enum: [ok, unavailable] }
+
+    PageMeta:
+      type: object
+      required: [total, limit, offset]
+      properties:
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+
+    SourceUpload:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          contentMediaType: text/csv
+          description: The CSV file. Accepted when the filename ends in `.csv` or the part's content type is `text/csv`.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Display name; defaults to the original filename.
+        encoding: { type: string, enum: [utf-8, utf-8-sig, latin-1, cp1252], default: utf-8 }
+        delimiter: { type: string, enum: [',', ';', "\t", '|'], default: ',' }
+        has_header: { type: boolean, default: true }
+        quote_char: { type: string, minLength: 1, maxLength: 1, default: '"' }
+
+    ColumnInfo:
+      type: object
+      required: [name, inferred_type, null_count]
+      properties:
+        name: { type: string, description: CSV header as it appears in the file (or `column_1`.. when has_header is false). }
+        inferred_type: { $ref: '#/components/schemas/ColumnType' }
+        null_count: { type: integer, minimum: 0, description: Empty values in the sampled rows. }
+
+    DataSource:
+      type: object
+      required: [id, name, original_filename, size_bytes, csv_options, columns, row_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        original_filename: { type: string }
+        size_bytes: { type: integer, minimum: 0 }
+        csv_options: { $ref: '#/components/schemas/CsvOptions' }
+        columns:
+          type: array
+          items: { $ref: '#/components/schemas/ColumnInfo' }
+        row_count: { type: integer, minimum: 0, description: 'Data rows, excluding the header.' }
+        created_at: { type: string, format: date-time }
+    DataSourcePage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/DataSource' }
+
+    CellValue:
+      description: A cell as JSON. Dates and datetimes are ISO 8601 strings; null for empty values.
+      type: [string, number, boolean, 'null']
+    CsvPreview:
+      type: object
+      required: [source_id, columns, rows, sampled_rows]
+      properties:
+        source_id: { type: string, format: uuid }
+        columns:
+          type: array
+          items: { $ref: '#/components/schemas/ColumnInfo' }
+        rows:
+          type: array
+          description: Raw string values keyed by column name; null for empty cells.
+          items:
+            type: object
+            additionalProperties:
+              type: [string, 'null']
+        sampled_rows: { type: integer, minimum: 0 }
+
+    PipelineCreate:
+      type: object
+      required: [name, source_id, config]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        source_id: { type: string, format: uuid }
+        config: { $ref: '#/components/schemas/PipelineConfig' }
+    Pipeline:
+      type: object
+      required: [id, name, description, source_id, config, config_version, created_at, updated_at, last_run]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        source_id: { type: string, format: uuid }
+        config: { $ref: '#/components/schemas/PipelineConfig' }
+        config_version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_run:
+          oneOf:
+            - $ref: '#/components/schemas/RunSummary'
+            - type: 'null'
+    PipelinePage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Pipeline' }
+    PipelineValidateRequest:
+      type: object
+      required: [config]
+      properties:
+        config:
+          description: Validated against PipelineConfig by the server; typed loosely so invalid configs reach the validator instead of failing request parsing.
+          type: object
+        source_id: { type: string, format: uuid }
+    PipelineValidationResult:
+      type: object
+      required: [valid, errors]
+      properties:
+        valid: { type: boolean }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/ErrorDetail' }
+
+    RunStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, interrupted]
+    Stage:
+      type: string
+      enum: [extract, transform, validate, load, publish]
+    RunSummary:
+      type: object
+      required: [id, status, queued_at, finished_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        queued_at: { type: string, format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+    Run:
+      type: object
+      required:
+        - id
+        - pipeline_id
+        - pipeline_name
+        - source_id
+        - status
+        - current_stage
+        - config_version
+        - queued_at
+        - started_at
+        - finished_at
+        - duration_ms
+        - rows_read
+        - rows_rejected
+        - rows_loaded
+        - dataset_id
+        - error_message
+      properties:
+        id: { type: string, format: uuid }
+        pipeline_id:
+          type: [string, 'null']
+          format: uuid
+          description: Null if the pipeline was deleted after the run.
+        pipeline_name: { type: string, description: Snapshot of the pipeline name at queue time. }
+        source_id: { type: [string, 'null'], format: uuid }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        current_stage:
+          oneOf:
+            - $ref: '#/components/schemas/Stage'
+            - type: 'null'
+        config_version: { type: integer, minimum: 1 }
+        queued_at: { type: string, format: date-time }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        duration_ms: { type: [integer, 'null'], minimum: 0 }
+        rows_read: { type: integer, minimum: 0 }
+        rows_rejected: { type: integer, minimum: 0 }
+        rows_loaded: { type: integer, minimum: 0 }
+        dataset_id:
+          type: [string, 'null']
+          format: uuid
+          description: Published dataset; set only when status is `succeeded`.
+        error_message: { type: [string, 'null'] }
+    RunPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Run' }
+    RunEvent:
+      type: object
+      required: [id, run_id, stage, status, rows_in, rows_out, message, created_at]
+      properties:
+        id: { type: integer }
+        run_id: { type: string, format: uuid }
+        stage: { $ref: '#/components/schemas/Stage' }
+        status: { type: string, enum: [started, progress, completed, failed] }
+        rows_in: { type: [integer, 'null'], minimum: 0 }
+        rows_out: { type: [integer, 'null'], minimum: 0 }
+        message: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    RejectedRow:
+      type: object
+      required: [row_number, column, rule, message, value]
+      properties:
+        row_number: { type: integer, minimum: 1, description: 1-based data row number in the source file (header excluded). }
+        column: { type: [string, 'null'], description: Target column name; null for row-level failures. }
+        rule:
+          type: string
+          description: A validation rule name from pipeline.schema.json, or `type_cast` / `parse_error`.
+          enum: [not_null, unique, range, allowed_values, regex, length, type_cast, parse_error]
+        message: { type: string }
+        value: { type: [string, 'null'], description: 'Offending raw value, truncated to 500 characters.' }
+    RejectedRowPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/RejectedRow' }
+
+    DatasetColumn:
+      type: object
+      required: [name, type]
+      properties:
+        name: { $ref: '#/components/schemas/Identifier' }
+        type: { $ref: '#/components/schemas/ColumnType' }
+    Dataset:
+      type: object
+      required: [id, table_name, pipeline_id, last_run_id, row_count, columns, published_at]
+      properties:
+        id: { type: string, format: uuid }
+        table_name: { $ref: '#/components/schemas/Identifier' }
+        pipeline_id: { type: [string, 'null'], format: uuid }
+        last_run_id: { type: string, format: uuid }
+        row_count: { type: integer, minimum: 0 }
+        columns:
+          type: array
+          items: { $ref: '#/components/schemas/DatasetColumn' }
+        published_at: { type: string, format: date-time }
+    DatasetPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Dataset' }
+    DatasetRowPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [columns, items]
+          properties:
+            columns:
+              type: array
+              items: { $ref: '#/components/schemas/DatasetColumn' }
+            items:
+              type: array
+              items:
+                type: object
+                additionalProperties: { $ref: '#/components/schemas/CellValue' }
+    ColumnProfile:
+      type: object
+      required: [name, type, null_count, distinct_count, min, max, top_values]
+      properties:
+        name: { $ref: '#/components/schemas/Identifier' }
+        type: { $ref: '#/components/schemas/ColumnType' }
+        null_count: { type: integer, minimum: 0 }
+        distinct_count: { type: integer, minimum: 0 }
+        min:
+          description: For integer, float, date and datetime columns; null otherwise.
+          type: [number, string, 'null']
+        max:
+          type: [number, string, 'null']
+        top_values:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [value, count]
+            properties:
+              value: { $ref: '#/components/schemas/CellValue' }
+              count: { type: integer, minimum: 1 }
+    DatasetProfile:
+      type: object
+      required: [dataset_id, row_count, columns]
+      properties:
+        dataset_id: { type: string, format: uuid }
+        row_count: { type: integer, minimum: 0 }
+        columns:
+          type: array
+          items: { $ref: '#/components/schemas/ColumnProfile' }
+
+    MetricsSummary:
+      type: object
+      required: [total_runs, runs_by_status, rows_loaded_total, avg_duration_ms, daily]
+      properties:
+        total_runs: { type: integer, minimum: 0 }
+        runs_by_status:
+          type: object
+          required: [queued, running, succeeded, failed, interrupted]
+          properties:
+            queued: { type: integer, minimum: 0 }
+            running: { type: integer, minimum: 0 }
+            succeeded: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0 }
+            interrupted: { type: integer, minimum: 0 }
+          additionalProperties: false
+        rows_loaded_total: { type: integer, minimum: 0 }
+        avg_duration_ms: { type: [number, 'null'], minimum: 0, description: Over finished runs; null when none. }
+        daily:
+          type: array
+          description: One entry per UTC day in the window, oldest first, including zero days.
+          items:
+            type: object
+            required: [date, succeeded, failed, interrupted, rows_loaded]
+            properties:
+              date: { type: string, format: date }
+              succeeded: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+              interrupted: { type: integer, minimum: 0 }
+              rows_loaded: { type: integer, minimum: 0 }

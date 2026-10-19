@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "columns": [{ "source": "n", "name": "n", "type": "integer" }],
+  "validations": [{ "rule": "range", "column": "n" }],
+  "target": { "table": "t", "mode": "replace" }
+}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "columns": [
+    { "source": "sensor", "name": "sensor_id", "type": "string" },
+    { "source": "ts", "name": "measured_at", "type": "datetime", "format": "%Y-%m-%dT%H:%M:%S" },
+    { "source": "value", "name": "reading", "type": "float" }
+  ],
+  "validations": [
+    { "rule": "not_null", "column": "reading" },
+    { "rule": "range", "column": "reading", "min": -50, "max": 150 }
+  ],
+  "on_validation_failure": "fail_run",
+  "target": { "table": "sensor_readings", "mode": "append" }
+}

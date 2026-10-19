@@ -1,0 +1,136 @@
+# LocalETL Task Board
+
+Maintained by the orchestrator on `main` only. Agents never edit this file; they report status in their completion report.
+Execution model: **Option B**, one Claude Code session per agent, each in its own Git worktree.
+
+## Status legend
+
+| Status | Meaning |
+|---|---|
+| Blocked | At least one dependency is not Done |
+| Ready | All dependencies Done; may start |
+| In progress | Agent working on it |
+| In review | Branch submitted; awaiting QA verdict and orchestrator review |
+| Done | Merged to `main`, full suite green on `main` |
+
+A dependency is **Done only when its deliverables are merged to `main`**. "Before review" dependencies let coding start early but must be Done before the ticket can be submitted.
+
+---
+
+## Wave 0: Foundation (orchestrator)
+
+| ID | Deliverable | Files | Acceptance criteria | Status |
+|---|---|---|---|---|
+| W0-01 | Project rules | `CLAUDE.md` | Mission, source-of-truth precedence, engineering rules, ownership, interface rules, git workflow, commands, completion report | Done (foundation commit) |
+| W0-02 | Requirements | `docs/requirements.md` | Numbered REQ-01…REQ-64 covering every MVP scope item; limits; non-goals | Done (foundation commit) |
+| W0-03 | Architecture + internal interfaces | `docs/architecture.md`, `.env.example` | Components, toolchain, ownership table, import rules, env vars, ETL engine interface (§5), semantic config rules (§6), DB schema + run state machine (§7) | Done (foundation commit) |
+| W0-04 | Pipeline config contract | `contracts/pipeline.schema.json`, `contracts/examples/pipeline/{valid,invalid}/` | Draft 2020-12; fixed op and rule enums; 3 valid and 8 invalid examples behave as labelled | Done (foundation commit) |
+| W0-05 | HTTP contract | `contracts/openapi.yaml` | OpenAPI 3.1, 22 operations, shared `Error`; references pipeline schema instead of duplicating it; Redocly lint 0 errors; `openapi-typescript` generates types | Done (foundation commit) |
+| W0-06 | Specialist agents | `.claude/agents/*.md` (6) | Frontmatter on line 1; owned paths match architecture §3 | Done (foundation commit) |
+| W0-07 | Task board + assignments | `docs/task-board.md`, `docs/assignments/*.md`, `docs/wave-1-runbook.md` | Every ticket has owner, dependencies, files, acceptance criteria, status | Done (foundation commit) |
+| W0-08 | Consistency check | `contracts/tools/check_contracts.py`, `.gitignore` | Cross-checks enums, refs, examples, required fields and ownership across contracts and docs; 0 failures | Done (foundation commit) |
+
+Foundation commit: see "Foundation record" at the end of this file.
+
+---
+
+## Wave 1: Core implementation
+
+Owners: ETL → `etl-engineer` (worktree `agent-etl`), BE → `backend-engineer` (`agent-backend`), FE → `frontend-engineer` (`agent-frontend`), QA → `qa-engineer` (`agent-qa`).
+Wave 2 (worker, visualization, browser E2E) is listed at the end and is not assigned yet.
+
+### ETL engine: `backend/app/etl/`, `backend/tests/etl/`
+
+| ID | Title | Depends on | Files to modify | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| ETL-01 | Public types, errors and interface stubs | W0 · *before review:* BE-01 | `backend/app/etl/__init__.py`, `types.py`, `errors.py`; `backend/tests/etl/test_public_api.py` | Every name in architecture §5 exported with exact signatures and full type hints (functions may raise `NotImplementedError`); dataclasses frozen; test asserts the export list; `mypy --strict backend/app/etl` passes; import-rule test (no FastAPI/`app.*` imports) | Ready |
+| ETL-02 | CSV inspect and preview | ETL-01 | `backend/app/etl/extract.py`, `backend/tests/etl/test_extract.py` | `inspect_csv` / `preview_csv` per §5; all 4 encodings and 4 delimiters; `has_header=false` naming; type inference for all 6 `ColumnType`s; `CsvFormatError` for every REQ-04 case; chunked reading | Blocked |
+| ETL-03 | Config validation | ETL-01 | `backend/app/etl/config.py`, `backend/tests/etl/test_config.py` | Loads `contracts/pipeline.schema.json` from the path in §5; all examples in `contracts/examples/pipeline/` behave as labelled; each semantic rule in §6 has a passing and a failing test; errors collected with JSON Pointer paths | Blocked |
+| ETL-04 | Transform stage | ETL-03 | `backend/app/etl/transform.py`, `backend/tests/etl/test_transform.py` | Column select/rename; casting per §5 stage 2 with `type_cast`/`not_null` rejections; ordered registry with exactly the 7 schema ops (completeness test against the schema enum); `deduplicate` across chunks; no `eval`/`exec`/`DataFrame.query`/`DataFrame.eval` | Blocked |
+| ETL-05 | Validate stage | ETL-03 | `backend/app/etl/validate.py`, `backend/tests/etl/test_validate.py` | Exactly the 6 schema rules (completeness test); one rejection per failing rule; `unique` across chunks; `fail_run` and `max_rejected_ratio` raise `RejectionLimitExceeded`; regex length cap | Blocked |
+| ETL-06 | Load and publish | ETL-01, QA-01 | `backend/app/etl/load.py`, `backend/tests/etl/test_load.py`, `backend/tests/etl/conftest.py` | Staging table `staging.run_<hex>`; type mapping §7.3 plus `_localetl_*` columns; `replace` and `append` publish in one transaction; append mismatch raises `LoadError`; failure leaves published table unchanged; identifiers validated and quoted; values bound; tests on `TEST_DATABASE_URL` (fixture creates `staging`/`datasets` schemas) incl. hostile names | Blocked |
+| ETL-07 | `run_pipeline` | ETL-02, ETL-04, ETL-05, ETL-06 | `backend/app/etl/runner.py`, `backend/tests/etl/test_runner.py` | Stage order and events per §5; `should_stop` raises `RunInterrupted` and drops staging; `rows_loaded + rows_rejected ≤ rows_read`, with rows dropped by `drop_null_rows`/`deduplicate` visible as `rows_in`/`rows_out` on transform events; first 1,000 rejections kept; never writes `public.*`; usable from a plain script (example in module docstring) | Blocked |
+
+### Backend API: `backend/app/{main.py,core,api,models,schemas}`, `backend/migrations/`, `backend/tests/{api,models}/`
+
+| ID | Title | Depends on | Files to modify | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| BE-01 | Project scaffold, settings, errors, health | W0 · *before review:* QA-01 | `backend/pyproject.toml`, `backend/app/__init__.py`, `backend/app/main.py`, `backend/app/core/{settings,db,errors}.py`, `backend/app/api/__init__.py`, `backend/app/api/health.py`, `backend/tests/conftest.py`, `backend/tests/api/test_health.py`, `backend/tests/api/test_errors.py` | pyproject declares exactly the libs in architecture §2 (others justified); `pip install -e '.[dev]'` works on Python 3.11; settings from env only; `/api/v1/health` reports `database: ok` against Postgres and `unavailable` when down; 422/404 bodies use contract `Error`; pytest + mypy pass | Ready |
+| BE-02 | Metadata models and migrations | BE-01, QA-01 | `backend/app/models/*.py`, `backend/alembic.ini`, `backend/migrations/**`, `backend/tests/models/test_migrations.py` | Tables, enum, indexes and FKs exactly per §7.1 (including schemas `staging`, `datasets`); `alembic upgrade head` / `downgrade base` on empty DB; tests prove both partial unique indexes reject a second running run and a second active run per pipeline | Blocked |
+| BE-03 | Sources endpoints | BE-02, ETL-02 | `backend/app/api/sources.py`, `backend/app/schemas/sources.py`, `backend/tests/api/test_sources.py` | `POST/GET /sources`, `GET/DELETE /sources/{id}`, `GET /sources/{id}/preview` match the contract exactly; streamed upload with 413 before full write; server-generated path `sources/<id>.csv`; 415/422 cases; delete 409 when referenced; uses `app.etl` public names only | Blocked |
+| BE-04 | Pipelines endpoints | BE-03, ETL-03 | `backend/app/api/pipelines.py`, `backend/app/schemas/pipelines.py`, `backend/tests/api/test_pipelines.py` | CRUD + `POST /pipelines/validate` per contract; validation via `validate_pipeline_config(..., source_columns=...)` only; `config_version` increments on PUT; duplicate name 409; delete with active run 409; `last_run` populated | Blocked |
+| BE-05 | Runs endpoints | BE-04 | `backend/app/api/runs.py`, `backend/app/schemas/runs.py`, `backend/tests/api/test_runs.py` | `POST /pipelines/{id}/runs` returns 202 `queued` with snapshot, never executes; 409 on second active run; `GET /runs` filters + pagination; `/runs/{id}`, `/events`, `/rejections` per contract | Blocked |
+| BE-06 | Datasets and metrics endpoints | BE-05 | `backend/app/api/datasets.py`, `backend/app/api/metrics.py`, `backend/app/schemas/{datasets,metrics}.py`, `backend/tests/api/test_datasets.py`, `backend/tests/api/test_metrics.py`, `backend/tests/api/test_contract_drift.py` | `/datasets`, `/datasets/{id}`, `/rows` (sort validated against registry columns), `/profile`, `/metrics/summary` (zero-filled days); `_localetl_*` hidden; drift test: served OpenAPI matches `contracts/openapi.yaml` for all 22 operations | Blocked |
+
+### Frontend: `frontend/` (except `src/features/analytics/`, `src/features/explorer/`)
+
+| ID | Title | Depends on | Files to modify | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| FE-01 | Scaffold and app shell | W0 | `frontend/package.json`, `vite.config.ts`, `tsconfig*.json`, `tailwind.config.ts`, `postcss.config.js`, `eslint.config.js`, `index.html`, `src/main.tsx`, `src/app/**` (router, layout, providers, design tokens), `src/test/setup.ts` | Libs per architecture §2 (Recharts installed for Wave 2); TS strict; routes Sources, Pipelines, Runs, Datasets (placeholder), Home; `npm ci`, `test`, `lint`, `build`, `tsc --noEmit` pass | Ready |
+| FE-02 | Generated types, API client, typed mocks | FE-01 | `src/app/api/schema.d.ts` (generated), `src/app/api/client.ts`, `src/app/api/fixtures/**`, `src/app/api/*.test.ts` | Types generated from `contracts/openapi.yaml` with the command in CLAUDE.md; one function per operation used by FE tickets; `Error` body surfaced as typed error; base URL `VITE_API_URL`; mock fixtures typed against generated types | Blocked |
+| FE-03 | Sources: upload and preview | FE-02 | `src/pages/sources/**`, `src/components/sources/**` | Upload with CSV options form and client size check; list with pagination; preview table rendered as text; loading/empty/error states; tests | Blocked |
+| FE-04 | Pipeline builder | FE-02 | `src/features/pipelines/**`, `src/pages/pipelines/**` | Builds configs valid against the schema from a source's columns; offers only the 7 ops and 6 rules; reorderable transformations; client checks + `POST /pipelines/validate`, errors shown at their JSON Pointer path; create/edit/delete; tests using the contract examples | Blocked |
+| FE-05 | Run controls, monitoring, history | FE-02 | `src/pages/runs/**`, `src/components/runs/**` | Run button (409 shown clearly); run detail with status, stage events, counters, rejections table; polling every 2 s that stops at terminal states; history list with pipeline/status filters; metrics as text (charts are Wave 2); tests incl. polling stop | Blocked |
+
+### QA: `tests/`, `scripts/`, `docs/qa/`, `.github/workflows/`, `docker-compose.yml`
+
+| ID | Title | Depends on | Files to modify | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| QA-01 | Local dev stack | W0 | `docker-compose.yml`, `scripts/db/init.sql`, `scripts/dev-up.sh`, `scripts/README.md` | `docker compose up -d db` starts Postgres 16 on `127.0.0.1:5432` with healthcheck, creating `localetl` and `localetl_test` from `.env` values; data in a named volume; script waits for healthy | Ready |
+| QA-02 | Test plan and traceability | W0 | `docs/qa/test-plan.md` | Every REQ-xx mapped to tests by layer and ticket; suite commands; Wave 1 exit criteria | Ready |
+| QA-03 | Synthetic CSV fixtures | W0 | `tests/fixtures/csv/**`, `tests/fixtures/generate_large.py`, `tests/fixtures/README.md` | Clean orders file matching `orders_full.json`; empty; header-only; BOM; latin-1; `;` `\t` `\|`; ragged rows; duplicate headers; >500 columns; hostile column names; dirty values hitting every rule; large file generated, not committed | Ready |
+| QA-04 | CI workflow | QA-01, BE-01, FE-01 | `.github/workflows/ci.yml`, `scripts/test-all.sh` | Runs contract check, Redocly lint, backend pytest (Postgres service) + mypy, frontend test/lint/build; `scripts/test-all.sh` runs the same locally | Blocked |
+| QA-05 | API conformance harness | BE-01 · extended after each BE merge | `tests/integration/conftest.py`, `tests/integration/test_api_conformance.py` | Validates live responses (status + body) against `contracts/openapi.yaml` for every merged endpoint, including error bodies | Blocked |
+| QA-06 | Review gate | each ticket In review | `docs/qa/reviews/<TICKET-ID>.md` | Per ticket: PASS/FAIL, suites run with counts, ownership check, CLAUDE.md rules check, defects with repro | Ongoing |
+| QA-07 | Wave 1 integration (exit gate) | ETL-07, BE-06, QA-03, QA-05 | `tests/integration/test_wave1_flow.py` | Via API: upload fixture → preview → create pipeline → validate → queue run (`queued`, 409 on second). Direct `run_pipeline` on the same snapshot: `replace` and `append` row counts in `datasets.*` match fixture expectations; failing pipeline publishes nothing; interrupted run drops staging | Blocked |
+
+---
+
+## Start readiness after the foundation commit
+
+| Agent | Can resume now with | Then |
+|---|---|---|
+| etl-engineer | **ETL-01** (submit after BE-01 merges) | ETL-03 → ETL-02 → ETL-04/ETL-05 → ETL-06 (needs QA-01) → ETL-07 |
+| backend-engineer | **BE-01** (submit after QA-01 merges) | BE-02 → BE-03 → BE-04 → BE-05 → BE-06 |
+| frontend-engineer | **FE-01** | FE-02 → FE-03 / FE-04 / FE-05 |
+| qa-engineer | **QA-01** first (unblocks DB work), then QA-03, QA-02 | QA-04, QA-05, QA-06 reviews, QA-07 |
+
+All four agents can resume immediately. Every other ticket is Blocked until its dependencies merge.
+
+Critical path: QA-01 → BE-01 → BE-02 → BE-03 → BE-04 → BE-05 → BE-06 → QA-07 (ETL-02/03 must land before BE-03/BE-04).
+
+```mermaid
+graph LR
+  W0 --> QA01 & BE01 & ETL01 & FE01 & QA02 & QA03
+  QA01 --> BE01r[BE-01 review] & BE02 & ETL06 & QA04
+  BE01 --> ETL01r[ETL-01 review] & BE02 & QA04 & QA05
+  ETL01 --> ETL02 & ETL03 & ETL06
+  ETL03 --> ETL04 & ETL05 & BE04
+  ETL02 & ETL04 & ETL05 & ETL06 --> ETL07
+  BE02 --> BE03
+  ETL02 --> BE03 --> BE04 --> BE05 --> BE06
+  FE01 --> FE02 --> FE03 & FE04 & FE05
+  FE01 --> QA04
+  ETL07 & BE06 & QA03 & QA05 --> QA07
+```
+
+## Wave 2 (not assigned yet)
+
+WK-01 claim/heartbeat/recovery loop · WK-02 run execution and success/failure transactions · WK-03 signal handling · VIZ-01 run metrics charts · VIZ-02 dataset explorer with profile charts · QA-08 Playwright E2E demo (MVP gate). Depends on Wave 1 exit (QA-07 PASS).
+
+## Shared-file rules
+
+Orchestrator only: `CLAUDE.md`, `contracts/**`, `docs/*.md` (not `docs/qa/`), `docs/assignments/`, `.claude/agents/`, `.env.example`, `.gitignore`, `README.md`, `backend/pyproject.toml` after BE-01 merges. Agents propose changes in their completion report.
+
+## Risks
+
+| ID | Risk | Mitigation |
+|---|---|---|
+| R1 | Agent sessions keep stale instructions in memory after the worktree is updated | Restart every session after sync (runbook step 3) |
+| R2 | Backend router registration in `app/main.py` conflicts between BE tickets | BE tickets are sequential; each rebases before review |
+| R3 | ETL tests need `backend/pyproject.toml` before BE-01 merges | ETL may use a temporary local venv; must pass via the real pyproject before review |
+| R4 | `regex` rule is a ReDoS vector | Pattern ≤ 200 chars, value ≤ 10,000 chars (schema + ETL-05); revisit with `re2` if needed |
+
+## Foundation record
+
+(filled in after the foundation commit)
