@@ -85,3 +85,14 @@ def test_pipeline_variants_match_schema() -> None:
 def test_no_pii_like_real_domains() -> None:
     text = (CSV / "orders_clean.csv").read_text()
     assert all(line.split(",")[1].strip().lower().endswith("@example.com") for line in text.splitlines()[1:])
+
+
+def test_counts_keep_dropped_separate_from_rejected() -> None:
+    """Decision Q3: dropped (dedup / null-drop) rows are not rejections."""
+    c = EXPECTED["orders_clean.csv"]
+    assert c["rows_read"] == c["rows_rejected"] + c["rows_dropped"] + c["rows_loaded"]
+    d = EXPECTED["orders_dirty.csv"]
+    for name, sc in d["scenarios"].items():
+        if "rows_loaded" in sc:
+            assert d["rows_read"] == sc["rows_rejected"] + sc["rows_dropped"] + sc["rows_loaded"], name
+    assert d["scenarios"]["pipelines/orders_dirty_reject.json"]["rows_dropped"] == 3

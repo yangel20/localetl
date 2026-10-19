@@ -64,7 +64,7 @@ def build_orders(expected: dict[str, Any]) -> None:
     write_rows("orders_clean.csv", [ORDER_HEADER, *clean])
     expected["orders_clean.csv"] = {
         "config": "contracts/examples/pipeline/valid/orders_full.json",
-        "rows_read": 200, "rows_rejected": 0, "rows_loaded": 200,
+        "rows_read": 200, "rows_rejected": 0, "rows_dropped": 0, "rows_loaded": 200,
         "append_twice_rows_loaded": 400,
         "sample_rows": {str(r[0]): expected_clean(r) for r in (clean[0], clean[2], clean[4], clean[199])},
     }
@@ -122,6 +122,8 @@ def build_orders(expected: dict[str, Any]) -> None:
     for rule, _ in bad:
         by_rule[rule] = by_rule.get(rule, 0) + 1
     n_bad = len(bad)
+    expected["_counting"] = ("Decision Q3: rows removed by deduplicate / drop_null_rows are DROPPED, not "
+                             "rejected. rows_read = rows_rejected + rows_dropped + rows_loaded.")
     expected["orders_dirty.csv"] = {
         "rows_read": len(allrows),
         "bad_rows_by_rule": by_rule,
@@ -130,12 +132,13 @@ def build_orders(expected: dict[str, Any]) -> None:
             "pipelines/orders_dirty_reject.json": {
                 "note": "orders_full + max_rejected_ratio 0.5; deduplicate silently drops the "
                         "conflicting duplicates (not rejections)",
-                "rows_rejected": n_bad, "rows_loaded": len(goods), "rejections_by_rule": by_rule,
+                "rows_rejected": n_bad, "rows_dropped": len(dupes), "rows_loaded": len(goods),
+                "rejections_by_rule": by_rule,
             },
             "pipelines/orders_dirty_unique.json": {
                 "note": "no deduplicate: the later duplicates fail the unique rule "
                         "(first occurrence in file order is kept)",
-                "rows_rejected": n_bad + len(dupes), "rows_loaded": len(goods),
+                "rows_rejected": n_bad + len(dupes), "rows_dropped": 0, "rows_loaded": len(goods),
                 "rejections_by_rule": {**by_rule, "unique": len(dupes)},
             },
             "contracts/examples/pipeline/valid/orders_full.json": {

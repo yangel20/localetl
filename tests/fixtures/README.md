@@ -4,13 +4,15 @@ All data is fake (`@example.com`, generated names). Nothing here is real or pers
 Regenerate with `python3 tests/fixtures/build_fixtures.py` (deterministic; a test checks it).
 `expected.json` holds the expected counts/outcomes; **do not edit by hand**.
 
+**Counting (decision Q3):** rows removed by `deduplicate` / `drop_null_rows` are *dropped*, not *rejected*. `rows_read = rows_rejected + rows_dropped + rows_loaded`; `expected.json` carries `rows_dropped` separately.
+
 ## Orders (match `contracts/examples/pipeline/valid/orders_full.json`)
 | File | Purpose |
 |---|---|
 | `csv/orders_clean.csv` | 200 valid rows with messy-but-valid values (padding, case, `done`/`cancel` aliases, blank `Is Gift`). With `orders_full.json`: read 200, rejected 0, loaded 200; appended twice → 400. |
 | `csv/orders_dirty.csv` | 96 rows: 70 good, 23 bad (each breaks exactly one rule: `type_cast` 5, `not_null` 3, `range` 6, `allowed_values` 3, `regex` 3, `length` 3), 3 conflicting duplicate `Order ID`s. |
-| `pipelines/orders_dirty_reject.json` | `orders_full` + ratio 0.5: rejected 23, loaded 70 (`deduplicate` silently drops the 3 duplicates). |
-| `pipelines/orders_dirty_unique.json` | no `deduplicate`: the `unique` rule rejects 3 more (26), loaded 70. |
+| `pipelines/orders_dirty_reject.json` | `orders_full` + ratio 0.5: rejected 23, dropped 3 (the duplicates), loaded 70. |
+| `pipelines/orders_dirty_unique.json` | no `deduplicate`: the `unique` rule rejects 3 more (26), dropped 0, loaded 70. |
 | `pipelines/orders_dirty_failrun.json` | `fail_run`: first rejection fails the run, nothing published. |
 | `contracts/.../orders_full.json` on dirty | 23/96 > 0.1 → run fails, nothing published. |
 | `pipelines/orders_append.json` / `orders_append_mismatch.json` | append onto `orders`; the mismatch variant has `amount` as string → `LoadError`. |
@@ -20,7 +22,8 @@ Per-file `parse_error` and `unique` expectations are in `expected.json`; the `un
 
 ## Format cases (`csv/`)
 `empty`, `header_only` (+ `_no_newline`), `bom_utf8`, `latin1`, `cp1252`, `invalid_utf8`, `semicolon`, `tab.tsv`, `pipe`, `crlf`, `quoted_multiline`, `no_header`, `ragged_rows`, `duplicate_headers`, `blank_lines`, `all_null_column`, `types_mixed`, `wide_500` (accepted boundary), `too_many_columns_501` (rejected), `hostile_columns` (SQL-injection-like and non-identifier headers and values).
-Expected outcomes are in `expected.json` under `formats`. Where it says "must be defined by ETL tests" (duplicate headers) the contracts do not specify behaviour.
+Expected outcomes are in `expected.json` under `formats`. `drop_null_rows` on `order_id` never fires with `orders_full.json`: `nullable: false` rejects null IDs first (`not_null`).
+Where it says "must be defined by ETL tests" (duplicate headers) the contracts do not specify behaviour.
 
 ## Large file (not committed)
 `python3 tests/fixtures/generate_large.py [--rows 1000000] [--out data/fixtures/large_orders.csv]` streams a seeded 10-column CSV (1M rows ≈ 117 MB, REQ-61). `data/` is git-ignored.
