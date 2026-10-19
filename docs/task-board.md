@@ -133,4 +133,9 @@ Orchestrator only: `CLAUDE.md`, `contracts/**`, `docs/*.md` (not `docs/qa/`), `d
 
 ## Foundation record
 
-(filled in after the foundation commit)
+| Item | Value |
+|---|---|
+| Foundation commit | `6749842e64ab8ba6ebb2b70d378f55c7826bfe60` (`6749842`, "Wave 0: project foundation") |
+| Parent | `e3f1bc9` initialize LocalETL project |
+| Date | 2026-10-19 |
+| Checks at commit | `contracts/tools/check_contracts.py`: 0 failures · Redocly lint: 0 errors (8 cosmetic warnings) · `openapi-typescript` generation OK |
