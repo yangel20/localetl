@@ -74,6 +74,7 @@ Note: the original three worktrees were created with `claude --worktree <name>`,
 6. Update the board on `main`: ticket **Done**, newly unblocked tickets **Ready**. Commit.
 7. Tell affected agents: owners of newly Ready tickets start them; agents stacked on the merged branch rebase onto `main`.
 8. Merge **one branch at a time**. Every later branch must rebase on the new `main` before its own trial merge.
+   *Exception (user approved 2026-10-19, BE-01b / FE-01 / QA-03 only):* QA may review at the existing commit without a rebase if the branch is unaffected by Q3. The trial merge into current `main` (step 5), the contract check and the relevant tests are still mandatory; any conflict or incompatibility means rebase or request changes.
 
 ## 6. Merge order
 
