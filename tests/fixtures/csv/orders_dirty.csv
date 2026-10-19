@@ -1,0 +1,97 @@
+Order ID,Customer Email,Country,Status,Amount,Order Date,Is Gift
+1045,User1045.Test@example.com, fr ,completed,295.615,2020-10-19,0
+abc,  User1071.Test@Example.COM ,MX,pending,337.533,2016-11-09,yes
+1092,  User1092.Test@Example.COM ,U,pending,344.669,2027-07-12,
+1046,User1046.Test@example.com,mx,done,449.951,2023-11-01,
+1064,User1064.Test@example.com,de,pending,452.772,2022-02-03,yes
+1062,  User1062.Test@Example.COM ,us,completed,32.914,2026-06-01,no
+1070,User1070.Test@example.com, mx ,pending,185.492,2023-07-13,
+1008,  User1008.Test@Example.COM ,fr,done,15.430,2016-05-03,0
+1020,  User1020.Test@Example.COM , de ,pending,12.400,2027-09-04,false
+1053,  User1053.Test@Example.COM ,FR,cancel,36.361,2013-07-22,0
+1002,  User1002.Test@Example.COM ,fr,completed,1.000,2015-02-08,no
+1038,  User1038.Test@Example.COM ,ca,pending,53.427,2021-10-16,no
+1075,User1075.Test@example.com, us ,pending,67.789,2016-02-19,maybe
+1004,User1004.Test@example.com,gb,pending,378.854,2027-09-16,TRUE
+1021,User1021.Test@example.com,CA,completed,436.603,2019-10-22,TRUE
+1007,User1007.Test@example.com,MX,cancel,105.728,2012-06-16,false
+1033,User1033.Test@example.com,MX,pending,21.880,2010-02-12,
+1047,  User1047.Test@Example.COM ,DE,done,498.658,2012-06-07,yes
+1080,  User1080.Test@Example.COM , us ,cancelled,-10,2014-12-19,1
+1001,User1001.Test@example.com,GB,cancelled,332.292,2020-02-01,no
+1014,  User1014.Test@Example.COM ,de,pending,53.932,2018-06-21,false
+1079,User1079.Test@example.com,MX,completed,-0.01,2017-05-24,
+1010,User1010.Test@example.com, fr ,pending,35.833,2013-11-03,yes
+1068,  User1068.Test@Example.COM ,de,completed,84.320,2015-03-23,TRUE
+1051,User1051.Test@example.com,GB,pending,26.934,2029-03-26,
+1025,User1025.Test@example.com, us ,completed,389.224,2014-11-26,
+1017,  User1017.Test@Example.COM ,DE,cancel,292.925,2010-11-04,true
+1034,User1034.Test@example.com,fr,pending,355.638,2023-03-08,
+1006,User1006.Test@example.com,gb,done,295.729,2029-02-19,true
+1093,User1093.Test@example.com,Germany,cancel,282.350,2010-10-03,
+1042,User1042.Test@example.com,fr,cancelled,268.647,2015-09-17,
+1050,  User1050.Test@Example.COM , mx ,done,167.360,2022-05-13,TRUE
+1060,User1060.Test@example.com, us ,cancel,17.502,2018-06-07,0
+1088,not-an-email,us,completed,180.053,2014-05-02,true
+1030,User1030.Test@example.com, mx ,cancelled,220.921,2027-03-06,false
+1065,  User1065.Test@Example.COM , mx ,cancelled,354.440,2012-11-24,
+1011,  User1011.Test@Example.COM ,MX,cancelled,422.007,2025-01-25,no
+1040,User1040.Test@example.com, mx ,done,468.469,2016-02-01,no
+1057,User1057.Test@example.com,GB,done,73.369,2012-04-17,0
+1091,User1091.Test@example.com,USA,done,320.244,2028-02-02,
+1035,  User1035.Test@Example.COM , de ,done,358.974,2014-07-23,0
+1084,User1084.Test@example.com,mx,cancelled,116.472,2101-01-01,
+1037,User1037.Test@example.com,US,done,312.866,2029-04-09,1
+1049,User1049.Test@example.com,CA,pending,283.833,2022-01-19,yes
+1013,User1013.Test@example.com,MX,completed,384.121,2012-09-28,no
+1015,User1015.Test@example.com, gb ,completed,62.349,2025-06-20,false
+1074,  User1074.Test@Example.COM ,gb,done,459.673,2024-13-45,true
+1083,  User1083.Test@Example.COM ,US,done,148.013,1999-12-31,0
+1012,User1012.Test@example.com,gb,completed,231.330,2026-07-18,
+1063,User1063.Test@example.com,MX,completed,32.808,2024-10-21,no
+1067,User1067.Test@example.com,GB,cancelled,423.727,2014-09-09,TRUE
+12.5.1,User1072.Test@example.com,us,cancelled,99.463,2014-09-07,0
+1073,User1073.Test@example.com,US,pending,"12,5x",2021-12-25,0
+1029,  User1029.Test@Example.COM ,CA,done,11.072,2018-10-04,TRUE
+1044,  User1044.Test@Example.COM ,us,cancelled,376.891,2026-06-11,TRUE
+1036,User1036.Test@example.com,mx,completed,362.522,2024-10-19,yes
+1085,User1085.Test@example.com, de ,shipped,378.664,2020-03-20,1
+1027,User1027.Test@example.com,GB,cancel,87.282,2023-12-09,
+1054,User1054.Test@example.com,mx,cancel,142.676,2024-05-15,true
+1002,  User1002.Test@Example.COM ,fr,completed,281.537,2015-02-08,no
+1069,User1069.Test@example.com,US,pending,465.115,2029-06-19,
+1003,User1003.Test@example.com,DE,pending,1.000,2014-01-16,
+1023,  User1023.Test@Example.COM ,US,cancelled,325.618,2020-12-20,1
+1005,  User1005.Test@Example.COM , gb ,done,396.911,2021-01-01,
+1055,User1055.Test@example.com, de ,cancel,450.361,2026-05-07,1
+1048,User1048.Test@example.com,fr,completed,469.720,2025-04-09,yes
+1022,User1022.Test@example.com,de,done,498.892,2014-05-23,
+1043,User1043.Test@example.com,FR,cancelled,256.312,2027-07-06,
+1003,User1003.Test@example.com,DE,pending,451.016,2014-01-16,
+1059,  User1059.Test@Example.COM ,MX,cancelled,10.582,2017-05-20,no
+1052,User1052.Test@example.com,mx,completed,138.949,2028-02-07,false
+1024,User1024.Test@example.com,fr,cancelled,459.737,2020-06-23,false
+1089,a@b,GB,cancel,220.550,2024-01-03,true
+1041,  User1041.Test@Example.COM ,US,cancel,418.919,2029-04-16,no
+,User1076.Test@example.com,mx,completed,87.313,2023-04-01,TRUE
+1056,  User1056.Test@Example.COM ,ca,pending,200.369,2028-12-02,0
+1032,  User1032.Test@Example.COM ,de,pending,233.395,2026-03-25,no
+,  User1077.Test@Example.COM ,FR,cancel,244.554,2013-07-16,0
+1082,User1082.Test@example.com,us,completed,-1e3,2025-11-11,
+1039,User1039.Test@example.com,FR,cancel,235.736,2012-01-19,yes
+1086,  User1086.Test@Example.COM ,fr,returned,71.766,2018-11-19,
+1026,  User1026.Test@Example.COM ,fr,cancelled,201.613,2027-12-16,
+1019,User1019.Test@example.com,CA,cancelled,269.436,2017-11-03,false
+1018,User1018.Test@example.com,de,pending,124.244,2020-02-28,0
+1081,User1081.Test@example.com,DE,cancelled,-999,2029-01-28,1
+1090,@example.com, gb ,cancelled,262.860,2014-06-14,false
+,User1078.Test@example.com,mx,cancel,212.449,2013-11-18,1
+1061,User1061.Test@example.com,FR,done,376.299,2017-10-22,no
+1066,User1066.Test@example.com,gb,cancel,241.216,2024-11-03,0
+1058,User1058.Test@example.com,de,pending,241.406,2023-11-17,
+1009,User1009.Test@example.com,MX,cancel,124.078,2019-03-08,no
+1087,User1087.Test@example.com,US,PENDING ,361.038,2023-04-27,
+1001,User1001.Test@example.com,GB,cancelled,1.000,2020-02-01,no
+1031,User1031.Test@example.com,CA,cancel,417.516,2027-03-13,yes
+1028,User1028.Test@example.com,mx,completed,174.412,2024-03-17,no
+1016,User1016.Test@example.com,fr,done,227.016,2022-06-18,1
