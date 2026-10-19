@@ -1,0 +1,17 @@
+Order ID,Customer Email,Country,Status,Amount,Order Date,Is Gift
+1,User1.Test@example.com,MX,done,14.226,2022-07-11,yes
+2,User2.Test@example.com,de,cancelled,246.825,2025-03-05,
+2,User2.Test@example.com,us,pending,9.99,2014-03-11,false
+2,User2.Test@example.com,de,done,9.99,2028-11-21,0
+3,  User3.Test@Example.COM ,MX,pending,456.332,2020-01-11,1
+3,  User3.Test@Example.COM ,CA,cancel,9.99,2029-07-13,no
+4,User4.Test@example.com,gb,cancel,393.255,2021-10-18,
+4,User4.Test@example.com,fr,completed,9.99,2025-05-06,1
+5,User5.Test@example.com, fr ,completed,-5.00,2012-02-24,TRUE
+5,User5.Test@example.com, mx ,completed,9.99,2025-04-04,
+6,  User6.Test@Example.COM ,mx,cancelled,433.270,2017-04-12,0
+7,User7.Test@example.com,CA,completed,42.177,2019-01-18,0
+8,User8.Test@example.com,us,completed,4.309,2010-12-18,TRUE
+9,  User9.Test@Example.COM ,CA,cancelled,102.497,2018-12-27,TRUE
+10,User10.Test@example.com, mx ,done,462.632,2021-04-06,TRUE
+11,User11.Test@example.com,CA,pending,252.478,2022-11-04,

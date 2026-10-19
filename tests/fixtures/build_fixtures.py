@@ -20,6 +20,17 @@ STATUSES = ["pending", "done", "cancel", "completed", "cancelled"]  # done/cance
 STATUS_OUT = {"done": "completed", "cancel": "cancelled"}
 
 
+COUNTERS = ("extracted_count", "loaded_count", "rejected_count",
+            "duplicate_dropped_count", "null_dropped_count")  # architecture section 5 (Q3), same order
+CHUNK_SIZES = [1, 2, 3, 5, 7, 9, 50_000]
+
+
+def counters(extracted: int, loaded: int, rejected: int = 0, dup: int = 0, null: int = 0) -> dict[str, int]:
+    """Five Q3 counters; asserts the reconciliation identity at generation time."""
+    assert extracted == loaded + rejected + dup + null, "reconciliation identity violated"
+    return dict(zip(COUNTERS, (extracted, loaded, rejected, dup, null), strict=True))
+
+
 def write(name: str, data: bytes) -> None:
     (CSV_DIR / name).write_bytes(data)
 
@@ -64,8 +75,9 @@ def build_orders(expected: dict[str, Any]) -> None:
     write_rows("orders_clean.csv", [ORDER_HEADER, *clean])
     expected["orders_clean.csv"] = {
         "config": "contracts/examples/pipeline/valid/orders_full.json",
-        "rows_read": 200, "rows_rejected": 0, "rows_dropped": 0, "rows_loaded": 200,
-        "append_twice_rows_loaded": 400,
+        "outcome": "succeeded",
+        "counters": counters(200, 200),
+        "append_twice": {"second_run_counters": counters(200, 200), "published_row_count": 400},
         "sample_rows": {str(r[0]): expected_clean(r) for r in (clean[0], clean[2], clean[4], clean[199])},
     }
 
@@ -122,35 +134,87 @@ def build_orders(expected: dict[str, Any]) -> None:
     for rule, _ in bad:
         by_rule[rule] = by_rule.get(rule, 0) + 1
     n_bad = len(bad)
-    expected["_counting"] = ("Decision Q3: rows removed by deduplicate / drop_null_rows are DROPPED, not "
-                             "rejected. rows_read = rows_rejected + rows_dropped + rows_loaded.")
+    expected["_counting"] = ("Decision Q3 (architecture section 5): five counters. For every SUCCEEDED "
+                             "scenario extracted_count = loaded_count + rejected_count + "
+                             "duplicate_dropped_count + null_dropped_count. Failed/interrupted runs have "
+                             "loaded_count 0 and the identity is not enforced.")
+    build_nulls(expected)
+    build_chunk_dupes(expected)
     expected["orders_dirty.csv"] = {
-        "rows_read": len(allrows),
+        "extracted_count": len(allrows),
         "bad_rows_by_rule": by_rule,
         "conflicting_duplicate_order_ids": len(dupes),
         "scenarios": {
             "pipelines/orders_dirty_reject.json": {
                 "note": "orders_full + max_rejected_ratio 0.5; deduplicate silently drops the "
                         "conflicting duplicates (not rejections)",
-                "rows_rejected": n_bad, "rows_dropped": len(dupes), "rows_loaded": len(goods),
+                "outcome": "succeeded",
+                "counters": counters(len(allrows), len(goods), n_bad, dup=len(dupes)),
                 "rejections_by_rule": by_rule,
             },
             "pipelines/orders_dirty_unique.json": {
                 "note": "no deduplicate: the later duplicates fail the unique rule "
                         "(first occurrence in file order is kept)",
-                "rows_rejected": n_bad + len(dupes), "rows_dropped": 0, "rows_loaded": len(goods),
+                "outcome": "succeeded",
+                "counters": counters(len(allrows), len(goods), n_bad + len(dupes)),
                 "rejections_by_rule": {**by_rule, "unique": len(dupes)},
             },
             "contracts/examples/pipeline/valid/orders_full.json": {
                 "note": f"{n_bad}/{len(allrows)} rejected exceeds max_rejected_ratio 0.1 -> "
                         "RejectionLimitExceeded; nothing published",
-                "outcome": "failed",
+                "outcome": "failed", "loaded_count": 0,
             },
             "pipelines/orders_dirty_failrun.json": {
                 "note": "on_validation_failure fail_run -> RejectionLimitExceeded on first rejection",
-                "outcome": "failed",
+                "outcome": "failed", "loaded_count": 0,
             },
         },
+    }
+
+
+def build_nulls(expected: dict[str, Any]) -> None:
+    """Rows removed by drop_null_rows (null_dropped_count > 0) and 'first removal wins'."""
+    rng = random.Random(777)
+    rows = [good_order(rng, i) for i in range(1, 21)]            # 20 good
+    for i, r in enumerate(rows[:5]):                              # 5 null e-mails -> null-dropped
+        r[1] = ""
+        r[0] = str(100 + i)
+    rows += [["", "nobody@example.com", "us", "pending", "1.00", "2024-01-01", "true"],   # null id, email set
+             ["", "", "us", "pending", "1.00", "2024-01-01", "true"]]                  # null id AND null email
+    # Both null-id rows are REJECTED (not_null): the nullable check runs before transformations.
+    write_rows("orders_nulls.csv", [ORDER_HEADER, *rows])
+    expected["orders_nulls.csv"] = {
+        "config": "pipelines/orders_nulls.json",
+        "note": "drop_null_rows(order_id, customer_email, how=any) on top of orders_full; order_id is "
+                "nullable:false so null ids are rejected (first removal wins), null e-mails are null-dropped",
+        "outcome": "succeeded",
+        "counters": counters(len(rows), 15, rejected=2, null=5),
+        "rejections_by_rule": {"not_null": 2},
+    }
+
+
+def build_chunk_dupes(expected: dict[str, Any]) -> None:
+    """Duplicate keys straddling chunk boundaries for chunk sizes 2, 3, 5 and 7."""
+    rng = random.Random(4242)
+    ids = [1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8, 9, 10, 11]
+    rows = [good_order(rng, i) for i in ids]
+    rows[8][4] = "-5.00"          # row 9: first occurrence of id 5, REJECTED by range(amount >= 0)
+    # Row 10 repeats id 5: the key was registered by row 9 (it reached deduplicate before validation),
+    # so row 10 is duplicate-dropped even though row 9 was rejected (architecture section 5, rule 5).
+    for i in (3, 4, 6, 8, 10):    # make the duplicates differ in content from the first occurrence
+        rows[i - 1][4] = "9.99"
+    write_rows("orders_chunk_dupes.csv", [ORDER_HEADER, *rows])
+    boundary = {str(c): [c, c + 1] for c in (2, 3, 5, 7, 9)}  # 1-based row pairs on each boundary
+    expected["orders_chunk_dupes.csv"] = {
+        "config": "contracts/examples/pipeline/valid/orders_full.json",
+        "note": "ids 2,2,2 (rows 2-4), 3,3 (rows 5-6), 4,4 (rows 7-8) straddle chunk boundaries; row 9 "
+                "(id 5) is rejected by range yet its key still drops row 10 as a duplicate",
+        "outcome": "succeeded",
+        "chunk_sizes": CHUNK_SIZES,
+        "straddling_row_pairs_by_chunk_size": boundary,
+        "counters_identical_for_every_chunk_size": counters(len(rows), 10, rejected=1, dup=5),
+        "duplicate_dropped_row_numbers": [3, 4, 6, 8, 10],
+        "rejected_row_numbers": [9],
     }
 
 
@@ -248,6 +312,12 @@ def build_pipelines() -> None:
     mismatch["validations"] = [v for v in mismatch["validations"] if v.get("column") != "amount"]
     mismatch["target"] = {"table": "orders", "mode": "append"}
     dump("orders_append_mismatch.json", mismatch)
+
+    nulls = json.loads(json.dumps(base))
+    ops = nulls["transformations"]
+    idx = next(i for i, t in enumerate(ops) if t["op"] == "drop_null_rows")
+    ops[idx] = {"op": "drop_null_rows", "columns": ["order_id", "customer_email"], "how": "any"}
+    dump("orders_nulls.json", nulls)
 
     append = json.loads(json.dumps(base))
     append["target"] = {"table": "orders", "mode": "append"}
