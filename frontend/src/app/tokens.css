@@ -1,0 +1,27 @@
+/* Design tokens (RGB triplets for Tailwind alpha support). */
+:root {
+  --color-surface: 255 255 255;
+  --color-surface-muted: 244 245 247;
+  --color-border: 217 220 226;
+  --color-fg: 24 28 36;
+  --color-fg-muted: 98 106 120;
+  --color-primary: 37 99 235;
+  --color-primary-fg: 255 255 255;
+  --color-success: 22 128 61;
+  --color-warning: 180 83 9;
+  --color-danger: 185 28 28;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: 17 20 27;
+    --color-surface-muted: 28 32 41;
+    --color-border: 52 58 70;
+    --color-fg: 233 236 241;
+    --color-fg-muted: 152 160 174;
+    --color-primary: 96 150 255;
+    --color-primary-fg: 10 14 22;
+    --color-success: 74 197 118;
+    --color-warning: 245 158 60;
+    --color-danger: 248 113 113;
+  }
+}
