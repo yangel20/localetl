@@ -84,6 +84,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DataSource' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
     delete:
       tags: [sources]
       operationId: deleteSource
@@ -91,6 +92,7 @@ paths:
       responses:
         '204': { description: Deleted. }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /sources/{source_id}/preview:
@@ -111,6 +113,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CsvPreview' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /pipelines:
@@ -181,6 +184,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Pipeline' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
     put:
       tags: [pipelines]
       operationId: updatePipeline
@@ -206,6 +210,7 @@ paths:
       responses:
         '204': { description: Deleted. }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /pipelines/{pipeline_id}/runs:
@@ -223,6 +228,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Run' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /runs:
@@ -261,6 +267,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Run' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /runs/{run_id}/events:
     parameters:
@@ -278,6 +285,7 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/RunEvent' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /runs/{run_id}/rejections:
     parameters:
@@ -328,6 +336,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Dataset' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /datasets/{dataset_id}/rows:
     parameters:
@@ -353,6 +362,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DatasetRowPage' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /datasets/{dataset_id}/profile:
@@ -369,6 +379,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DatasetProfile' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /metrics/summary:
     get:
@@ -435,6 +447,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     ValidationError:
       description: Request or config failed validation. `code` = `validation_error`; `details` lists each failing path.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: Unexpected server condition, e.g. a data source's stored file or a dataset's published table is missing. `code` = `internal_error`; no internal detail is exposed.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
