@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "columns": [
+    {
+      "source": "id",
+      "name": "id",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "source": "name",
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "source": "amount",
+      "name": "amount",
+      "type": "integer"
+    }
+  ],
+  "on_validation_failure": "reject_row",
+  "max_rejected_ratio": 0.6,
+  "target": {
+    "table": "ragged",
+    "mode": "replace"
+  }
+}

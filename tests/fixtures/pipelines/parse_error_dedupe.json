@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "columns": [
+    {
+      "source": "id",
+      "name": "id",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "source": "name",
+      "name": "name",
+      "type": "string"
+    }
+  ],
+  "transformations": [
+    {
+      "op": "deduplicate",
+      "columns": [
+        "id"
+      ]
+    }
+  ],
+  "target": {
+    "table": "dedupe",
+    "mode": "replace"
+  }
+}
