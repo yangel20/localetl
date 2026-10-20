@@ -1,5 +1,14 @@
-import { PagePlaceholder } from '../../components/PagePlaceholder';
+import { Route, Routes } from 'react-router-dom';
+import { PipelineEditPage } from './PipelineEditPage';
+import { PipelineListPage } from './PipelineListPage';
+import { PipelineNewPage } from './PipelineNewPage';
 
 export function PipelinesPage() {
-  return <PagePlaceholder title="Pipelines" description="Configure cleaning, validation and loading." />;
+  return (
+    <Routes>
+      <Route index element={<PipelineListPage />} />
+      <Route path="new" element={<PipelineNewPage />} />
+      <Route path=":pipelineId" element={<PipelineEditPage />} />
+    </Routes>
+  );
 }
