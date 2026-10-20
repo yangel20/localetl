@@ -1,5 +1,12 @@
-import { PagePlaceholder } from '../../components/PagePlaceholder';
+import { Route, Routes } from 'react-router-dom';
+import { SourceDetailPage } from './SourceDetailPage';
+import { SourceListPage } from './SourceListPage';
 
 export function SourcesPage() {
-  return <PagePlaceholder title="Sources" description="Upload and preview CSV files." />;
+  return (
+    <Routes>
+      <Route index element={<SourceListPage />} />
+      <Route path=":sourceId" element={<SourceDetailPage />} />
+    </Routes>
+  );
 }
