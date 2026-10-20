@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 import sqlalchemy as sa
+from fastapi import FastAPI
 
 from app.etl import (
     CsvOptions,
@@ -57,6 +58,19 @@ COUNTERS = (
 
 
 # ----------------------------------------------------------------------------------- helpers
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _fresh_engine_cache(app_under_test: FastAPI) -> Iterator[None]:
+    """``get_session`` calls ``get_engine()`` directly, so the dependency override in conftest does
+    not reach it and the lru-cached engine of an earlier test module (whose scratch database is
+    gone) would be reused. Clear the cache once this module's app and environment exist."""
+    from app.core.db import get_engine
+
+    get_engine.cache_clear()
+    yield
+    get_engine().dispose()
+    get_engine.cache_clear()
 
 
 @pytest.fixture
