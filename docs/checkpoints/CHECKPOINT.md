@@ -3,18 +3,18 @@
 Updated 2026-10-20 by the orchestrator. Read this first; `docs/task-board.md` has detail, `SESSION_HANDOFF.md` is the 2026-10-19 history.
 
 ## Main
-- `main` = see `git log -1` (last milestone: BE-04 + QA-05c merge `af90757`). `scripts/test-all.sh` 16/16 green.
+- `main` = see `git log -1` (last milestone: BE-05 + QA-05d merge `29d810b`). `scripts/test-all.sh` 16/16 green.
 - Shared Postgres: compose project `localetl`, container `localetl-db-1`, `127.0.0.1:55432`. Start with `POSTGRES_PORT=55432 scripts/dev-up.sh` (use `docker compose up -d --pull never db` first if offline). Tests use throwaway DBs.
 - Full check: `PYTHON=<venv>/bin/python DATABASE_URL=…:55432/localetl TEST_DATABASE_URL=…:55432/localetl_test scripts/test-all.sh`. Install: `pip install -e 'backend[dev]'`.
 
 ## Done (Wave 1)
-ETL-01, 02, 03, 03b, 04, 05, 06, 07 (engine complete) · BE-01, 01b, 02, 03, 04 · FE-01, 02, 02r, 03, 04, 05 · QA-01, 02, 02b, 03, 03b, 03c, 03d, 04, 05, 05b.
+ETL-01, 02, 03, 03b, 04, 05, 06, 07 (engine complete) · BE-01, 01b, 02, 03, 04, 05 · FE-01, 02, 02r, 03, 04, 05 · QA-01, 02, 02b, 03, 03b, 03c, 03d, 04, 05, 05b.
 
 ## Active
 | Ticket | Owner | State |
 |---|---|---|
-| BE-05 | backend | in progress; merges together with QA-05d |
-| BE-06 → QA-07 | backend / qa | blocked in sequence |
+| BE-06 | backend | in progress; merges together with QA-05e |
+| QA-07 | qa | blocked on BE-06 |
 | Wave 2 (WK-01..03, VIZ-01..02, QA-08) | — | not started; after QA-07 PASS |
 
 ## Decided (binding, in architecture §5/§6, contracts)
