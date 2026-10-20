@@ -269,6 +269,10 @@ def app_under_test(scratch_url: str, data_dir: Path) -> Iterator[FastAPI]:
     patch.setenv("DATABASE_URL", scratch_url)
     patch.setenv("LOCALETL_DATA_DIR", str(data_dir))
     get_settings.cache_clear()
+    # `get_session` calls `get_engine()` directly, so the dependency override below does not reach
+    # it: drop any engine cached by an earlier module (its scratch database is gone) so the
+    # first request builds one for this module's DATABASE_URL.
+    get_engine.cache_clear()
     engine = make_engine(scratch_url)
     app = create_app()
     app.dependency_overrides[get_engine] = lambda: engine
@@ -276,6 +280,8 @@ def app_under_test(scratch_url: str, data_dir: Path) -> Iterator[FastAPI]:
         yield app
     finally:
         engine.dispose()
+        get_engine().dispose()  # the engine `get_session` cached for this module
+        get_engine.cache_clear()
         patch.undo()
         get_settings.cache_clear()
 
