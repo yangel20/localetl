@@ -721,7 +721,7 @@ export interface components {
             source: components["schemas"]["SourceColumnName"];
             name: components["schemas"]["Identifier"];
             type: components["schemas"]["ColumnType"];
-            /** @description strptime format for date/datetime columns, e.g. %Y-%m-%d. Ignored for other types. */
+            /** @description strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). */
             format?: string;
             /** @default true */
             nullable: boolean;
@@ -790,7 +790,7 @@ export interface components {
                     source: components["schemas"]["SourceColumnName"];
                     name: components["schemas"]["Identifier"];
                     type: components["schemas"]["ColumnType"];
-                    /** @description strptime format for date/datetime columns, e.g. %Y-%m-%d. Ignored for other types. */
+                    /** @description strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). */
                     format?: string;
                     /** @default true */
                     nullable: boolean;
