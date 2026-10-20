@@ -41,12 +41,12 @@ COVERAGE: dict[str, str] = {
     "getSource": COVERED,
     "deleteSource": COVERED,
     "previewSource": COVERED,
-    "createPipeline": "pending: BE-04",
-    "listPipelines": "pending: BE-04",
-    "validatePipelineConfig": "pending: BE-04",
-    "getPipeline": "pending: BE-04",
-    "updatePipeline": "pending: BE-04",
-    "deletePipeline": "pending: BE-04",
+    "createPipeline": COVERED,
+    "listPipelines": COVERED,
+    "validatePipelineConfig": COVERED,
+    "getPipeline": COVERED,
+    "updatePipeline": COVERED,
+    "deletePipeline": COVERED,
     "createRun": "pending: BE-05",
     "listRuns": "pending: BE-05",
     "getRun": "pending: BE-05",
@@ -747,3 +747,446 @@ def test_sources_never_expose_server_paths(
     r = upload(client, contract, "id\n1\n", "p.csv")
     assert "stored_path" not in r.json() and "sha256" not in r.json()
     assert str(data_dir) not in r.text
+
+
+# ----------------------------------------------------------------------------------------------
+# BE-04: pipelines (createPipeline, listPipelines, getPipeline, updatePipeline, deletePipeline,
+# validatePipelineConfig). Error `path`s are JSON Pointers into the request, so config problems
+# are reported under `/config/...` (contract: ErrorDetail.path).
+# ----------------------------------------------------------------------------------------------
+
+PIPELINES = "/pipelines"
+EXAMPLES = Path(__file__).resolve().parents[2] / "contracts" / "examples" / "pipeline"
+
+
+def orders_config() -> dict[str, object]:
+    return json.loads((EXAMPLES / "valid" / "orders_full.json").read_text("utf-8"))
+
+
+def make_source(client: httpx.Client, contract: Contract, name: str = "orders") -> str:
+    r = upload(client, contract, fixture_bytes("orders_clean.csv"), "orders_clean.csv", name=name)
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+def body(source_id: str, name: str = "orders cleanup", **over: object) -> dict[str, object]:
+    return {
+        "name": name,
+        "description": "d",
+        "source_id": source_id,
+        "config": orders_config(),
+        **over,
+    }
+
+
+def create_pipeline(
+    client: httpx.Client, contract: Contract, source_id: str, name: str = "orders cleanup"
+) -> httpx.Response:
+    return client.post(f"{contract.prefix}{PIPELINES}", json=body(source_id, name))
+
+
+def add_run(
+    engine: sa.Engine, pipeline_id: str, status: str, queued_at: str = "2026-10-20T10:00:00Z"
+) -> str:
+    run_id = str(uuid.uuid4())
+    finished = None if status in ("queued", "running") else queued_at
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO runs (id, pipeline_id, pipeline_name, config_snapshot, config_version,"
+                " status, queued_at, finished_at) VALUES (:id, :pid, 'p', '{}', 1,"
+                " CAST(:status AS run_status), :queued, :finished)"
+            ),
+            {
+                "id": run_id,
+                "pid": pipeline_id,
+                "status": status,
+                "queued": queued_at,
+                "finished": finished,
+            },
+        )
+    return run_id
+
+
+def test_op_createPipeline(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    r = create_pipeline(client, contract, sid)
+    assert (
+        conformance.assert_conforms(r).operation_id == "createPipeline"
+    )  # incl. config vs pipeline.schema.json
+    assert r.status_code == 201
+    p = r.json()
+    assert p["name"] == "orders cleanup" and p["description"] == "d" and p["source_id"] == sid
+    assert p["config_version"] == 1 and p["last_run"] is None and p["config"] == orders_config()
+    assert count(clean, "pipelines") == 1
+    minimal = client.post(
+        f"{contract.prefix}{PIPELINES}",
+        json={
+            "name": "minimal",
+            "source_id": sid,
+            "config": {
+                "version": 1,
+                "columns": [{"source": "Order ID", "name": "id", "type": "integer"}],
+                "target": {"table": "minimal", "mode": "replace"},
+            },
+        },
+    )
+    conformance.assert_conforms(minimal)
+    assert minimal.status_code == 201 and minimal.json()["description"] is None
+
+
+def test_createPipeline_409_duplicate_name(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    assert create_pipeline(client, contract, sid, "same").status_code == 201
+    r = create_pipeline(client, contract, sid, "same")
+    conformance.assert_conforms(r)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "conflict"
+    assert count(clean, "pipelines") == 1
+
+
+def test_createPipeline_404_unknown_source(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    r = client.post(f"{contract.prefix}{PIPELINES}", json=body(str(uuid.uuid4())))
+    conformance.assert_conforms(r)
+    assert r.status_code == 404 and count(clean, "pipelines") == 0
+
+
+@pytest.mark.parametrize(
+    ("label", "mutate", "path"),
+    [
+        (
+            "bad column type",
+            lambda c: c["columns"][0].__setitem__("type", "decimal"),
+            "/config/columns/0/type",
+        ),
+        (
+            "unknown property",
+            lambda c: c["target"].__setitem__("schema", "public"),
+            "/config/target",
+        ),
+        (
+            "bad load mode",
+            lambda c: c["target"].__setitem__("mode", "upsert"),
+            "/config/target/mode",
+        ),
+        ("wrong version", lambda c: c.__setitem__("version", 2), "/config/version"),
+        (
+            "unknown column reference",
+            lambda c: c["validations"][0].__setitem__("column", "nope"),
+            "/config/validations/0/column",
+        ),
+        (
+            "reserved table prefix",
+            lambda c: c["target"].__setitem__("table", "run_x"),
+            "/config/target/table",
+        ),
+        (
+            "source column missing in the CSV",
+            lambda c: c["columns"][0].__setitem__("source", "Not In File"),
+            "/config/columns/0/source",
+        ),
+        (
+            "format on a string column",
+            lambda c: c["columns"][1].__setitem__("format", "%Y"),
+            "/config/columns/1/format",
+        ),
+    ],
+)
+def test_createPipeline_422_config_errors_are_prefixed_with_config(
+    client: httpx.Client,
+    conformance: Conformance,
+    contract: Contract,
+    clean: sa.Engine,
+    label: str,
+    mutate: Callable[[dict[str, object]], None],
+    path: str,
+) -> None:
+    sid = make_source(client, contract)
+    config = orders_config()
+    mutate(config)
+    r = client.post(f"{contract.prefix}{PIPELINES}", json=body(sid, config=config))
+    conformance.assert_conforms(r)
+    assert r.status_code == 422, (label, r.text)
+    paths = [d["path"] for d in r.json()["error"]["details"]]
+    assert path in paths, (label, paths)
+    assert all(p.startswith("/config") for p in paths), (label, paths)
+    assert count(clean, "pipelines") == 0
+
+
+def test_createPipeline_422_every_invalid_contract_example(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    files = sorted((EXAMPLES / "invalid").glob("*.json"))
+    assert len(files) == 8
+    for f in files:
+        r = client.post(
+            f"{contract.prefix}{PIPELINES}",
+            json=body(sid, config=json.loads(f.read_text("utf-8"))),
+        )
+        conformance.assert_conforms(r)
+        assert r.status_code == 422, f.name
+        paths = [d["path"] for d in r.json()["error"]["details"]]
+        assert paths and all(p == "/config" or p.startswith("/config/") for p in paths), (
+            f.name,
+            paths,
+        )
+    assert count(clean, "pipelines") == 0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"name": ""},
+        {"name": "x" * 201},
+        {"description": "x" * 2001},
+        {"extra": 1},
+        {"source_id": "not-a-uuid"},
+        {"config": "not an object"},
+    ],
+)
+def test_createPipeline_422_request_shape(
+    client: httpx.Client,
+    conformance: Conformance,
+    contract: Contract,
+    clean: sa.Engine,
+    bad: dict[str, object],
+) -> None:
+    sid = make_source(client, contract)
+    r = client.post(f"{contract.prefix}{PIPELINES}", json=body(sid, **bad))
+    conformance.assert_conforms(r)
+    assert r.status_code == 422 and r.json()["error"]["details"]
+
+
+def test_op_listPipelines(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    empty = client.get(f"{contract.prefix}{PIPELINES}")
+    assert conformance.assert_conforms(empty).operation_id == "listPipelines"
+    assert empty.json() == {"total": 0, "limit": 50, "offset": 0, "items": []}
+    sid = make_source(client, contract)
+    ids = [create_pipeline(client, contract, sid, f"p{i}").json()["id"] for i in range(3)]
+    page = client.get(f"{contract.prefix}{PIPELINES}")
+    conformance.assert_conforms(page)
+    assert (
+        page.json()["total"] == 3 and [p["id"] for p in page.json()["items"]] == ids[::-1]
+    )  # most recently updated first
+    # updating the oldest moves it to the front
+    upd = client.put(f"{contract.prefix}{PIPELINES}/{ids[0]}", json=body(sid, "p0"))
+    assert upd.status_code == 200
+    reordered = client.get(f"{contract.prefix}{PIPELINES}")
+    assert reordered.json()["items"][0]["id"] == ids[0]
+    p2 = client.get(f"{contract.prefix}{PIPELINES}", params={"limit": 1, "offset": 1})
+    conformance.assert_conforms(p2)
+    assert p2.json()["limit"] == 1 and p2.json()["offset"] == 1 and len(p2.json()["items"]) == 1
+    for bad in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        r = client.get(f"{contract.prefix}{PIPELINES}", params=bad)
+        conformance.assert_conforms(r)
+        assert r.status_code == 422, bad
+
+
+def test_pipelines_last_run_is_the_most_recent_run(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    pid = create_pipeline(client, contract, sid).json()["id"]
+    add_run(clean, pid, "failed", "2026-10-20T09:00:00Z")
+    newest = add_run(clean, pid, "succeeded", "2026-10-20T11:00:00Z")
+    add_run(clean, pid, "interrupted", "2026-10-20T10:00:00Z")
+    got = client.get(f"{contract.prefix}{PIPELINES}/{pid}")
+    conformance.assert_conforms(got)
+    assert (
+        got.json()["last_run"]["id"] == newest and got.json()["last_run"]["status"] == "succeeded"
+    )
+    assert got.json()["last_run"]["finished_at"] is not None
+    listed = client.get(f"{contract.prefix}{PIPELINES}")
+    conformance.assert_conforms(listed)
+    assert listed.json()["items"][0]["last_run"]["id"] == newest
+
+
+def test_op_getPipeline(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    created = create_pipeline(client, contract, sid)
+    r = client.get(f"{contract.prefix}{PIPELINES}/{created.json()['id']}")
+    assert conformance.assert_conforms(r).operation_id == "getPipeline"
+    assert r.json() == created.json()
+    missing = client.get(f"{contract.prefix}{PIPELINES}/{uuid.uuid4()}")
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    conformance.assert_error_body(
+        client.get(f"{contract.prefix}{PIPELINES}/not-a-uuid"), 422, "validation_error"
+    )
+
+
+def test_op_updatePipeline(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    pid = create_pipeline(client, contract, sid, "orig").json()["id"]
+    url = f"{contract.prefix}{PIPELINES}/{pid}"
+    changed = orders_config()
+    changed["target"] = {"table": "orders_v2", "mode": "append"}  # type: ignore[index]
+    r = client.put(url, json=body(sid, "renamed", config=changed, description=None))
+    assert conformance.assert_conforms(r).operation_id == "updatePipeline"
+    assert r.status_code == 200
+    p = r.json()
+    assert p["id"] == pid and p["name"] == "renamed" and p["description"] is None
+    assert (
+        p["config"]["target"] == {"table": "orders_v2", "mode": "append"}
+        and p["config_version"] == 2
+    )
+    assert p["updated_at"] >= p["created_at"]
+    again = client.put(url, json=body(sid, "renamed", config=changed))
+    conformance.assert_conforms(again)
+    assert again.json()["config_version"] == 3  # incremented on every PUT
+    assert client.get(url).json()["config_version"] == 3
+    # keeping its own name is not a conflict
+    assert client.put(url, json=body(sid, "renamed")).status_code == 200
+
+
+def test_updatePipeline_errors_do_not_change_anything(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    a = create_pipeline(client, contract, sid, "a").json()
+    b = create_pipeline(client, contract, sid, "b").json()
+    url = f"{contract.prefix}{PIPELINES}/{b['id']}"
+    conflict = client.put(url, json=body(sid, "a"))
+    conformance.assert_conforms(conflict)
+    assert conflict.status_code == 409 and conflict.json()["error"]["code"] == "conflict"
+    unknown_source = client.put(url, json=body(str(uuid.uuid4()), "b"))
+    conformance.assert_conforms(unknown_source)
+    assert unknown_source.status_code == 404
+    bad = orders_config()
+    bad["columns"][0]["type"] = "decimal"  # type: ignore[index]
+    invalid = client.put(url, json=body(sid, "b", config=bad))
+    conformance.assert_conforms(invalid)
+    assert invalid.status_code == 422
+    assert "/config/columns/0/type" in [d["path"] for d in invalid.json()["error"]["details"]]
+    missing = client.put(f"{contract.prefix}{PIPELINES}/{uuid.uuid4()}", json=body(sid, "x"))
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    after = client.get(url).json()
+    assert after["config_version"] == 1 and after["name"] == "b" and after["config"] == b["config"]
+    assert client.get(f"{contract.prefix}{PIPELINES}/{a['id']}").json()["name"] == "a"
+
+
+def test_op_deletePipeline(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    pid = create_pipeline(client, contract, sid).json()["id"]
+    done = add_run(clean, pid, "succeeded")
+    r = client.delete(f"{contract.prefix}{PIPELINES}/{pid}")
+    assert conformance.assert_conforms(r).operation_id == "deletePipeline"
+    assert r.status_code == 204 and r.content == b""
+    assert count(clean, "pipelines") == 0
+    with clean.connect() as conn:  # history is kept, detached from the pipeline
+        row = conn.execute(
+            sa.text("SELECT pipeline_id FROM runs WHERE id = :id"), {"id": done}
+        ).one()
+    assert row[0] is None
+    gone = client.delete(f"{contract.prefix}{PIPELINES}/{pid}")
+    conformance.assert_conforms(gone)
+    assert gone.status_code == 404
+    conformance.assert_error_body(
+        client.delete(f"{contract.prefix}{PIPELINES}/not-a-uuid"), 422, "validation_error"
+    )
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_deletePipeline_409_with_an_active_run(
+    client: httpx.Client,
+    conformance: Conformance,
+    contract: Contract,
+    clean: sa.Engine,
+    status: str,
+) -> None:
+    sid = make_source(client, contract)
+    pid = create_pipeline(client, contract, sid).json()["id"]
+    run_id = add_run(clean, pid, status)
+    r = client.delete(f"{contract.prefix}{PIPELINES}/{pid}")
+    conformance.assert_conforms(r)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "conflict"
+    assert (
+        count(clean, "pipelines") == 1
+        and client.get(f"{contract.prefix}{PIPELINES}/{pid}").status_code == 200
+    )
+    with clean.begin() as conn:
+        conn.execute(
+            sa.text("UPDATE runs SET status = 'failed', finished_at = now() WHERE id = :id"),
+            {"id": run_id},
+        )
+    ok = client.delete(f"{contract.prefix}{PIPELINES}/{pid}")
+    conformance.assert_conforms(ok)
+    assert ok.status_code == 204
+
+
+def test_op_validatePipelineConfig(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    url = f"{contract.prefix}{PIPELINES}/validate"
+    ok = client.post(url, json={"config": orders_config(), "source_id": sid})
+    assert conformance.assert_conforms(ok).operation_id == "validatePipelineConfig"
+    assert ok.status_code == 200 and ok.json() == {"valid": True, "errors": []}
+    no_source = client.post(url, json={"config": orders_config()})
+    conformance.assert_conforms(no_source)
+    assert no_source.json() == {"valid": True, "errors": []}
+    assert count(clean, "pipelines") == 0  # never persists
+    bad = orders_config()
+    bad["columns"][0]["type"] = "decimal"  # type: ignore[index]
+    bad["validations"][0]["column"] = "nope"  # type: ignore[index]
+    r = client.post(url, json={"config": bad, "source_id": sid})
+    conformance.assert_conforms(r)
+    assert r.status_code == 200 and r.json()["valid"] is False  # an invalid config is still a 200
+    paths = [e["path"] for e in r.json()["errors"]]
+    assert "/config/columns/0/type" in paths and all(p.startswith("/config") for p in paths)
+
+
+def test_validatePipelineConfig_source_columns_and_errors(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid = make_source(client, contract)
+    url = f"{contract.prefix}{PIPELINES}/validate"
+    config = orders_config()
+    config["columns"][0]["source"] = "Not In File"  # type: ignore[index]
+    without = client.post(url, json={"config": config})
+    conformance.assert_conforms(without)
+    assert without.json()["valid"] is True  # source columns are only checked when a source is given
+    with_source = client.post(url, json={"config": config, "source_id": sid})
+    conformance.assert_conforms(with_source)
+    assert with_source.json()["valid"] is False
+    assert "/config/columns/0/source" in [e["path"] for e in with_source.json()["errors"]]
+    unknown = client.post(url, json={"config": orders_config(), "source_id": str(uuid.uuid4())})
+    conformance.assert_conforms(unknown)
+    assert unknown.status_code == 404
+    for bad_body in (
+        {},
+        {"config": "x"},
+        {"config": {}, "source_id": "nope"},
+        {"config": {}, "extra": 1},
+    ):
+        r = client.post(url, json=bad_body)
+        conformance.assert_conforms(r)
+        assert r.status_code == 422, bad_body
+    # every contract example behaves as labelled, with /config-prefixed paths
+    for f in sorted((EXAMPLES / "valid").glob("*.json")):
+        r = client.post(url, json={"config": json.loads(f.read_text("utf-8"))})
+        conformance.assert_conforms(r)
+        assert r.json()["valid"] is True, f.name
+    for f in sorted((EXAMPLES / "invalid").glob("*.json")):
+        r = client.post(url, json={"config": json.loads(f.read_text("utf-8"))})
+        conformance.assert_conforms(r)
+        errors = r.json()["errors"]
+        assert r.json()["valid"] is False and errors, f.name
+        assert all(e["path"] == "/config" or e["path"].startswith("/config/") for e in errors), (
+            f.name
+        )
