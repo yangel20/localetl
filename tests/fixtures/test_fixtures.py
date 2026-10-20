@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -290,6 +291,8 @@ def test_structure_expectations_match_reference_tokenizer(name: str) -> None:
             assert e["value"] == value
     if "expected_width" in want:
         assert got["width"] == want["expected_width"]
+    if "names" in want:
+        assert got["header"] == want["names"], name
 
 
 def test_structure_rules_spot_checks() -> None:
@@ -407,3 +410,38 @@ def test_readme_no_longer_says_behaviour_is_unspecified() -> None:
     text = (HERE / "README.md").read_text()
     assert "must be defined by ETL tests" not in text
     assert "CSV structure" in text
+
+
+def test_hostile_columns_header_is_accepted_and_clean() -> None:
+    """QA-03d: hostile *names*, not an empty header (Q4-a would reject the file)."""
+    header = rows("hostile_columns.csv")[0]
+    want = EXPECTED["formats"]["hostile_columns.csv"]
+    assert len(header) == 16 == want["column_count"]
+    assert all(h != "" for h in header), "an empty header makes the file a CsvFormatError (Q4-a)"
+    assert len(set(header)) == len(header), "duplicate headers are a CsvFormatError (Q4-a)"
+    assert header == want["names"]  # verbatim, including padding and quotes
+    assert want["row_count"] == len(rows("hostile_columns.csv")) - 1 == 2
+    assert want["parse_errors"] == [] and "outcome" not in want  # accepted, not rejected
+    assert all(len(r) == 16 for r in rows("hostile_columns.csv"))
+    assert any(not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", h) for h in header)  # really hostile
+
+
+def test_no_committed_csv_has_an_empty_header_unless_expected() -> None:
+    """Guard against the QA-03d class of bug: an unintended empty/duplicate header in a fixture."""
+    allowed = {
+        name
+        for name, entry in EXPECTED["formats"].items()
+        if isinstance(entry, dict) and entry.get("outcome") == "CsvFormatError"
+    }
+    headerless = {"no_header.csv", "headerless_ragged.csv", "headerless_ragged_first_short.csv"}
+    for path in sorted(CSV.glob("*.csv")):
+        if path.name in allowed | headerless or path.stat().st_size == 0:
+            continue
+        raw = path.read_bytes()
+        enc = "latin-1" if path.name in {"latin1.csv", "cp1252.csv", "invalid_utf8.csv"} else "utf-8-sig"
+        try:
+            header = next(csv.reader(io.StringIO(raw.decode(enc), newline="")))
+        except (UnicodeDecodeError, StopIteration):
+            continue
+        assert "" not in header, f"{path.name}: empty header name"
+        assert len(set(header)) == len(header), f"{path.name}: duplicate header names"
