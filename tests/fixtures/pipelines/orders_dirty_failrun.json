@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "columns": [
+    {
+      "source": "Order ID",
+      "name": "order_id",
+      "type": "integer",
+      "nullable": false
+    },
+    {
+      "source": "Customer Email",
+      "name": "customer_email",
+      "type": "string"
+    },
+    {
+      "source": "Country",
+      "name": "country",
+      "type": "string"
+    },
+    {
+      "source": "Status",
+      "name": "status",
+      "type": "string"
+    },
+    {
+      "source": "Amount",
+      "name": "amount",
+      "type": "float"
+    },
+    {
+      "source": "Order Date",
+      "name": "order_date",
+      "type": "date",
+      "format": "%Y-%m-%d"
+    },
+    {
+      "source": "Is Gift",
+      "name": "is_gift",
+      "type": "boolean"
+    }
+  ],
+  "transformations": [
+    {
+      "op": "trim_whitespace",
+      "columns": [
+        "customer_email",
+        "country",
+        "status"
+      ]
+    },
+    {
+      "op": "change_case",
+      "columns": [
+        "customer_email"
+      ],
+      "case": "lower"
+    },
+    {
+      "op": "change_case",
+      "columns": [
+        "country"
+      ],
+      "case": "upper"
+    },
+    {
+      "op": "replace_values",
+      "column": "status",
+      "mapping": {
+        "done": "completed",
+        "cancel": "cancelled"
+      }
+    },
+    {
+      "op": "fill_null",
+      "column": "is_gift",
+      "value": false
+    },
+    {
+      "op": "drop_null_rows",
+      "columns": [
+        "order_id"
+      ]
+    },
+    {
+      "op": "deduplicate",
+      "columns": [
+        "order_id"
+      ]
+    },
+    {
+      "op": "round_number",
+      "column": "amount",
+      "decimals": 2
+    }
+  ],
+  "validations": [
+    {
+      "rule": "not_null",
+      "column": "order_id"
+    },
+    {
+      "rule": "unique",
+      "columns": [
+        "order_id"
+      ]
+    },
+    {
+      "rule": "range",
+      "column": "amount",
+      "min": 0
+    },
+    {
+      "rule": "range",
+      "column": "order_date",
+      "min": "2000-01-01",
+      "max": "2100-12-31"
+    },
+    {
+      "rule": "allowed_values",
+      "column": "status",
+      "values": [
+        "pending",
+        "completed",
+        "cancelled"
+      ]
+    },
+    {
+      "rule": "regex",
+      "column": "customer_email",
+      "pattern": "[^@\\s]+@[^@\\s]+\\.[a-z]{2,}"
+    },
+    {
+      "rule": "length",
+      "column": "country",
+      "min": 2,
+      "max": 2
+    }
+  ],
+  "on_validation_failure": "fail_run",
+  "target": {
+    "table": "orders",
+    "mode": "replace"
+  }
+}

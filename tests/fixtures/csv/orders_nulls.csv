@@ -1,0 +1,23 @@
+Order ID,Customer Email,Country,Status,Amount,Order Date,Is Gift
+100,,DE,completed,222.798,2021-10-09,no
+101,,ca,pending,461.348,2029-09-13,yes
+102,,US,pending,345.980,2020-02-28,true
+103,,gb,cancelled,169.129,2028-05-04,0
+104,, fr ,cancelled,62.804,2023-10-26,true
+6,  User6.Test@Example.COM ,fr,cancelled,73.905,2026-02-18,
+7,User7.Test@example.com,GB,cancel,434.429,2025-02-18,
+8,User8.Test@example.com,de,pending,219.579,2016-11-19,TRUE
+9,  User9.Test@Example.COM ,US,completed,88.997,2025-12-03,
+10,User10.Test@example.com, mx ,cancelled,465.438,2019-04-04,1
+11,User11.Test@example.com,US,cancelled,416.990,2011-01-16,yes
+12,  User12.Test@Example.COM ,gb,cancel,413.125,2015-12-04,
+13,User13.Test@example.com,MX,pending,326.858,2025-07-14,TRUE
+14,User14.Test@example.com,mx,cancel,294.735,2027-06-22,
+15,  User15.Test@Example.COM , ca ,cancelled,26.306,2011-06-10,
+16,User16.Test@example.com,gb,completed,75.316,2019-12-22,
+17,User17.Test@example.com,GB,completed,6.352,2018-08-12,
+18,  User18.Test@Example.COM ,gb,completed,79.167,2020-02-10,yes
+19,User19.Test@example.com,FR,completed,78.296,2027-10-15,1
+20,User20.Test@example.com, us ,completed,497.000,2012-06-04,TRUE
+,nobody@example.com,us,pending,1.00,2024-01-01,true
+,,us,pending,1.00,2024-01-01,true
