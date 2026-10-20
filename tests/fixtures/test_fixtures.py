@@ -518,7 +518,11 @@ def test_no_committed_csv_has_an_empty_header_unless_expected() -> None:
         if path.name in allowed | headerless or path.stat().st_size == 0:
             continue
         raw = path.read_bytes()
-        enc = "latin-1" if path.name in {"latin1.csv", "cp1252.csv", "invalid_utf8.csv"} else "utf-8-sig"
+        enc = (
+            "latin-1"
+            if path.name in {"latin1.csv", "cp1252.csv", "invalid_utf8.csv"}
+            else "utf-8-sig"
+        )
         try:
             header = next(csv.reader(io.StringIO(raw.decode(enc), newline="")))
         except (UnicodeDecodeError, StopIteration):
