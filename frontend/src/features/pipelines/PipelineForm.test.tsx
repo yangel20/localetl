@@ -143,6 +143,17 @@ describe('server validation', () => {
     expect(sent).toMatchObject({ source_id: IDS.source });
   });
 
+  it('fallback: a bare path (no /config prefix) lands on the same control', async () => {
+    setup(existing(), {
+      'POST /pipelines/validate': () =>
+        json({ valid: false, errors: [{ path: '/target/table', message: 'bare path error' }] }),
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-path="/target/table"]')).toHaveTextContent('bare path error');
+    });
+  });
+
   it('reports a valid config', async () => {
     setup(existing());
     await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
