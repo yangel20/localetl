@@ -525,7 +525,7 @@ components:
       properties:
         name: { type: string, description: CSV header as it appears in the file (or `column_1`.. when has_header is false). }
         inferred_type: { $ref: '#/components/schemas/ColumnType' }
-        null_count: { type: integer, minimum: 0, description: Empty values in the sampled rows. }
+        null_count: { type: integer, minimum: 0, description: Empty values in the sampled well-formed rows (malformed records are excluded; decision Q4-c). }
 
     DataSource:
       type: object
@@ -539,7 +539,7 @@ components:
         columns:
           type: array
           items: { $ref: '#/components/schemas/ColumnInfo' }
-        row_count: { type: integer, minimum: 0, description: 'Data rows, excluding the header.' }
+        row_count: { type: integer, minimum: 0, description: 'Data records, excluding the header and blank lines. Includes malformed records (wrong field count or a quoting fault), which runs reject as parse_error and which the preview omits (decision Q4-c).' }
         created_at: { type: string, format: date-time }
     DataSourcePage:
       allOf:
@@ -564,12 +564,12 @@ components:
           items: { $ref: '#/components/schemas/ColumnInfo' }
         rows:
           type: array
-          description: Raw string values keyed by column name; null for empty cells.
+          description: Raw string values keyed by column name; null for empty cells. Well-formed records only; malformed records are omitted, so a clean preview does not guarantee that a run has no parse_error rejections (decision Q4-c).
           items:
             type: object
             additionalProperties:
               type: [string, 'null']
-        sampled_rows: { type: integer, minimum: 0 }
+        sampled_rows: { type: integer, minimum: 0, description: Well-formed records examined for this preview and its inferred types. }
 
     PipelineCreate:
       type: object
