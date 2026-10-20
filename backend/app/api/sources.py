@@ -44,6 +44,25 @@ _FORM_FIELD_MAX_BYTES = 64 * 1024
 _ENVELOPE_SLACK_BYTES = 1024 * 1024  # multipart framing + small form fields on top of the file
 _MAX_FILENAME_CHARS = 255
 
+# Inline copy of the contract's SourceUpload (the request is parsed by hand, so FastAPI cannot
+# derive it). tests/api/test_contract_drift.py keeps it in step with contracts/openapi.yaml.
+_SOURCE_UPLOAD_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["file"],
+    "properties": {
+        "file": {"type": "string", "contentMediaType": "text/csv"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "encoding": {
+            "type": "string",
+            "enum": ["utf-8", "utf-8-sig", "latin-1", "cp1252"],
+            "default": "utf-8",
+        },
+        "delimiter": {"type": "string", "enum": [",", ";", "\t", "|"], "default": ","},
+        "has_header": {"type": "boolean", "default": True},
+        "quote_char": {"type": "string", "minLength": 1, "maxLength": 1, "default": '"'},
+    },
+}
+
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     413: {"description": "Upload exceeds LOCALETL_MAX_UPLOAD_MB."},
     415: {"description": "File is not a CSV."},
@@ -307,9 +326,7 @@ def _store_source(
     openapi_extra={
         "requestBody": {
             "required": True,
-            "content": {
-                "multipart/form-data": {"schema": {"$ref": "#/components/schemas/SourceUpload"}}
-            },
+            "content": {"multipart/form-data": {"schema": _SOURCE_UPLOAD_SCHEMA}},
         }
     },
 )
