@@ -100,8 +100,11 @@ step "hygiene (no .env / data committed)" hygiene
 step "contracts: check_contracts.py" "$PYTHON" contracts/tools/check_contracts.py .
 step "contracts: redocly lint" npx --yes "@redocly/cli@${REDOCLY_VERSION}" lint contracts/openapi.yaml
 
-step "backend: ruff check" bash -c 'cd backend && "$0" -m ruff check .' "$PYTHON"
-step "backend: ruff format --check" bash -c 'cd backend && "$0" -m ruff format --check .' "$PYTHON"
+# Lint scope (F11): backend/ and tests/ with the backend ruff config, run from the repo root so the
+# result is identical to `cd backend && ruff check . ../tests` (known-first-party = ["app"]).
+# contracts/tools is orchestrator-owned and not linted here (it has its own findings; see QA-04 report).
+step "lint: ruff check backend tests" "$PYTHON" -m ruff check --config backend/pyproject.toml backend tests
+step "lint: ruff format --check backend tests" "$PYTHON" -m ruff format --check --config backend/pyproject.toml backend tests
 step "backend: mypy app" bash -c 'cd backend && "$0" -m mypy app' "$PYTHON"
 step "backend: mypy --strict app/etl" bash -c 'cd backend && "$0" -m mypy --strict app/etl' "$PYTHON"
 
