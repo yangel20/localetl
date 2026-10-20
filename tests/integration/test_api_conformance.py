@@ -1558,7 +1558,7 @@ def test_op_getRun(
     with clean.begin() as conn:
         conn.execute(
             sa.text(
-                "UPDATE runs SET started_at = now(), current_stage = 'transform',""
+                "UPDATE runs SET started_at = now(), current_stage = 'transform',"
                 " extracted_count = 50, rejected_count = 3 WHERE id = :id"
             ),
             {"id": live},
