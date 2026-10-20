@@ -177,4 +177,48 @@ describe('run detail', () => {
     expect(calls(`/runs/${IDS.runRunning}`)).toHaveLength(after);
     expect(calls('/events')).toHaveLength(3);
   });
+
+  it('shows rejections that only exist once the run is terminal (QA case)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    let polls = 0;
+    const entry = { row_number: 4, column: 'amount', rule: 'type_cast', message: 'not a float', value: 'abc' };
+    renderAt(`/runs/${IDS.runRunning}`, {
+      'GET /runs/[^/]+': () => {
+        polls++;
+        return polls <= 2
+          ? json({ ...runRunning, rejected_count: 1 })
+          : json({ ...runSucceeded, id: IDS.runRunning, rejected_count: 1 }); // count unchanged at the end
+      },
+      // entries are persisted only at the end of the run
+      'GET /runs/[^/]+/rejections': () =>
+        polls < 3 ? json({ total: 0, limit: 50, offset: 0, items: [] }) : json({ total: 1, limit: 50, offset: 0, items: [entry] }),
+    });
+    const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    await tick(0);
+    await tick(2000);
+    const rej = screen.getByRole('region', { name: 'Rejected rows' });
+    expect(rej).toHaveTextContent('1 row(s) rejected so far');
+    expect(rej).not.toHaveTextContent('No rejected rows.');
+
+    await tick(2000); // run is now succeeded
+    expect(screen.getByRole('region', { name: 'Rejected rows' })).toHaveTextContent('not a float');
+    expect(screen.getByText('abc')).toBeInTheDocument();
+    expect(rej).not.toHaveTextContent('No rejected rows.');
+  });
+
+  it('keeps the previous rejections visible during a refetch', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    let polls = 0;
+    const entry = { row_number: 2, column: 'a', rule: 'not_null', message: 'm', value: null };
+    renderAt(`/runs/${IDS.runRunning}`, {
+      'GET /runs/[^/]+': () => (++polls === 1 ? json({ ...runRunning, rejected_count: 1 }) : json({ ...runRunning, rejected_count: 2 })),
+      'GET /runs/[^/]+/rejections': () => json({ total: 1, limit: 50, offset: 0, items: [entry] }),
+    });
+    const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    await tick(0);
+    expect(screen.getByText('not_null')).toBeInTheDocument();
+    await tick(2000); // count changes: refetch, old rows stay
+    expect(screen.queryByText('Loading rejections…')).toBeNull();
+    expect(screen.getByText('not_null')).toBeInTheDocument();
+  });
 });
