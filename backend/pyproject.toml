@@ -16,7 +16,7 @@ dependencies = [
     "alembic>=1.13,<2",
     "pandas>=2.2,<3",
     "jsonschema>=4.21,<5",
-    "python-multipart>=0.0.9",
+    "python-multipart>=0.0.13,<0.1",  # python_multipart import path (BE-03) exists from 0.0.13
     "uvicorn>=0.30,<1",
 ]
 
