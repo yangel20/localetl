@@ -83,7 +83,25 @@ export function emptyConfig(columns: ColumnMapping[] = [], table = ''): Pipeline
   };
 }
 
-export function newTransformation(op: Transformation['op'], firstColumn: string): Transformation {
+type ColType = ColumnMapping['type'];
+const ONLY: Partial<Record<string, ColType[]>> = {
+  trim_whitespace: ['string'],
+  change_case: ['string'],
+  round_number: ['float'],
+  regex: ['string'],
+  length: ['string'],
+  range: ['integer', 'float', 'date', 'datetime'],
+};
+
+/** First mapped column the operation or rule can apply to (section 6 rules 3 and 4); else the first column. */
+export function defaultColumn(columns: readonly ColumnMapping[], opOrRule: string): string {
+  const allowed = ONLY[opOrRule];
+  const hit = allowed ? columns.find((c) => allowed.includes(c.type)) : columns[0];
+  return (hit ?? columns[0])?.name ?? '';
+}
+
+export function newTransformation(op: Transformation['op'], columns: readonly ColumnMapping[]): Transformation {
+  const firstColumn = defaultColumn(columns, op);
   switch (op) {
     case 'trim_whitespace':
       return { op, columns: [firstColumn] };
@@ -102,7 +120,8 @@ export function newTransformation(op: Transformation['op'], firstColumn: string)
   }
 }
 
-export function newValidation(rule: Validation['rule'], firstColumn: string): Validation {
+export function newValidation(rule: Validation['rule'], columns: readonly ColumnMapping[]): Validation {
+  const firstColumn = defaultColumn(columns, rule);
   switch (rule) {
     case 'not_null':
       return { rule, column: firstColumn };

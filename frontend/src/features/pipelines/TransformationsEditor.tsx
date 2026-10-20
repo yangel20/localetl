@@ -104,7 +104,7 @@ export function TransformationsEditor({
           value=""
           disabled={names.length === 0}
           onChange={(e) => {
-            if (e.target.value) onChange([...items, newTransformation(e.target.value as Transformation['op'], names[0] ?? '')]);
+            if (e.target.value) onChange([...items, newTransformation(e.target.value as Transformation['op'], columns)]);
           }}
         >
           <option value="">Choose…</option>

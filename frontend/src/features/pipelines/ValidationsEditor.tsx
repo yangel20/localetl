@@ -118,7 +118,7 @@ export function ValidationsEditor({
           value=""
           disabled={names.length === 0}
           onChange={(e) => {
-            if (e.target.value) onChange([...items, newValidation(e.target.value as Validation['rule'], names[0] ?? '')]);
+            if (e.target.value) onChange([...items, newValidation(e.target.value as Validation['rule'], columns)]);
           }}
         >
           <option value="">Choose…</option>
