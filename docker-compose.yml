@@ -1,9 +1,11 @@
 # Local dev stack: PostgreSQL 16 only (API, worker and frontend run on the host).
 # Values come from .env (copy .env.example); defaults match .env.example.
+# The project name is pinned so every checkout and worktree addresses the same stack;
+# COMPOSE_PROJECT_NAME (or -p) still overrides it, e.g. for a throwaway review stack.
+name: localetl
 services:
   db:
     image: postgres:16
-    container_name: localetl-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-localetl}
@@ -16,7 +18,9 @@ services:
       # Runs only on first initialisation of an empty volume.
       - ./scripts/db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # -h 127.0.0.1 checks the TCP listener (not only the init-time unix socket), so "healthy"
+      # means clients on the published port can connect.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 3s
       retries: 30

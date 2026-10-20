@@ -1,4 +1,8 @@
-"""Self-checks for the synthetic fixtures (stdlib + optional jsonschema). Run: pytest tests/fixtures"""
+"""Self-checks for the synthetic fixtures (stdlib + optional jsonschema).
+
+Run: pytest tests/fixtures
+"""
+
 from __future__ import annotations
 
 import csv
@@ -24,7 +28,9 @@ def rows(name: str, encoding: str = "utf-8", delimiter: str = ",") -> list[list[
 def test_generator_is_deterministic(tmp_path: Path) -> None:
     before = {p.name: p.read_bytes() for p in CSV.iterdir()}
     exp = (HERE / "expected.json").read_bytes()
-    subprocess.run([sys.executable, str(HERE / "build_fixtures.py")], check=True, capture_output=True)
+    subprocess.run(
+        [sys.executable, str(HERE / "build_fixtures.py")], check=True, capture_output=True
+    )
     assert {p.name: p.read_bytes() for p in CSV.iterdir()} == before
     assert (HERE / "expected.json").read_bytes() == exp
 
@@ -35,8 +41,13 @@ def test_clean_orders_counts() -> None:
     assert len({row[0] for row in r[1:]}) == 200
 
 
-COUNTERS = ["extracted_count", "loaded_count", "rejected_count",
-            "duplicate_dropped_count", "null_dropped_count"]
+COUNTERS = [
+    "extracted_count",
+    "loaded_count",
+    "rejected_count",
+    "duplicate_dropped_count",
+    "null_dropped_count",
+]
 
 
 def _scenarios() -> list[tuple[str, dict]]:
@@ -50,7 +61,9 @@ def _scenarios() -> list[tuple[str, dict]]:
         for name, sc in entry.get("scenarios", {}).items():
             out.append((f"{file}::{name}", sc))
         if "counters_identical_for_every_chunk_size" in entry:
-            out.append((file, {**entry, "counters": entry["counters_identical_for_every_chunk_size"]}))
+            out.append(
+                (file, {**entry, "counters": entry["counters_identical_for_every_chunk_size"]})
+            )
     return out
 
 
@@ -73,8 +86,12 @@ def test_reconciliation_identity_for_every_successful_scenario() -> None:
     for name, sc in _scenarios():
         if sc.get("outcome") == "succeeded":
             c = sc["counters"]
-            assert c["extracted_count"] == (c["loaded_count"] + c["rejected_count"]
-                                            + c["duplicate_dropped_count"] + c["null_dropped_count"]), name
+            assert c["extracted_count"] == (
+                c["loaded_count"]
+                + c["rejected_count"]
+                + c["duplicate_dropped_count"]
+                + c["null_dropped_count"]
+            ), name
             checked += 1
     # clean, dirty_reject, dirty_unique, nulls, chunk_dupes, ragged_rows, malformed_chunk_straddle,
     # parse_error_dedupe
@@ -101,17 +118,21 @@ def test_dirty_orders_scenarios() -> None:
 
 def test_null_dropped_case_exists() -> None:
     c = EXPECTED["orders_nulls.csv"]["counters"]
-    assert c["null_dropped_count"] > 0 and c["rejected_count"] > 0  # null id rejected: first removal wins
+    assert (
+        c["null_dropped_count"] > 0 and c["rejected_count"] > 0
+    )  # null id rejected: first removal wins
 
 
-def reference_counters(name: str, chunk: int, *, null_cols: tuple[int, ...] = (), dedup: bool) -> dict[str, int]:
+def reference_counters(
+    name: str, chunk: int, *, null_cols: tuple[int, ...] = (), dedup: bool
+) -> dict[str, int]:
     """Tiny independent model of architecture section 5 rules for the orders files:
     cast/nullable (order_id) -> drop_null_rows -> deduplicate(order_id) -> range(amount >= 0)."""
     data = rows(name)[1:]
     seen: set[str] = set()
     c = dict.fromkeys(COUNTERS, 0)
     for start in range(0, len(data), chunk):
-        for r in data[start:start + chunk]:
+        for r in data[start : start + chunk]:
             c["extracted_count"] += 1
             if not r[0].strip() or not r[0].strip().lstrip("-").isdigit():
                 c["rejected_count"] += 1
@@ -141,15 +162,27 @@ def test_chunk_boundary_duplicates() -> None:
 
 
 def test_reference_model_agrees_with_other_files() -> None:
-    assert reference_counters("orders_clean.csv", 7, dedup=True) == EXPECTED["orders_clean.csv"]["counters"]
-    assert (reference_counters("orders_nulls.csv", 3, null_cols=(0, 1), dedup=True)
-            == EXPECTED["orders_nulls.csv"]["counters"])
+    assert (
+        reference_counters("orders_clean.csv", 7, dedup=True)
+        == EXPECTED["orders_clean.csv"]["counters"]
+    )
+    assert (
+        reference_counters("orders_nulls.csv", 3, null_cols=(0, 1), dedup=True)
+        == EXPECTED["orders_nulls.csv"]["counters"]
+    )
 
 
-@pytest.mark.parametrize("name,enc,delim", [
-    ("bom_utf8.csv", "utf-8-sig", ","), ("latin1.csv", "latin-1", ","), ("cp1252.csv", "cp1252", ","),
-    ("semicolon.csv", "utf-8", ";"), ("tab.tsv", "utf-8", "\t"), ("pipe.csv", "utf-8", "|"),
-])
+@pytest.mark.parametrize(
+    "name,enc,delim",
+    [
+        ("bom_utf8.csv", "utf-8-sig", ","),
+        ("latin1.csv", "latin-1", ","),
+        ("cp1252.csv", "cp1252", ","),
+        ("semicolon.csv", "utf-8", ";"),
+        ("tab.tsv", "utf-8", "\t"),
+        ("pipe.csv", "utf-8", "|"),
+    ],
+)
 def test_format_fixtures_parse(name: str, enc: str, delim: str) -> None:
     r = rows(name, enc, delim)
     assert r[0][0] == "id" and len(r[0]) >= 4 and len(r) >= 4
@@ -184,8 +217,10 @@ def test_pipeline_variants_match_schema() -> None:
 
 def test_no_pii_like_real_domains() -> None:
     text = (CSV / "orders_clean.csv").read_text()
-    assert all(line.split(",")[1].strip().lower().endswith("@example.com") for line in text.splitlines()[1:])
-
+    assert all(
+        line.split(",")[1].strip().lower().endswith("@example.com")
+        for line in text.splitlines()[1:]
+    )
 
 
 # ----------------------------------------------------------------------------------------------
@@ -200,8 +235,9 @@ class FileLevelError(Exception):
     """Stands for CsvFormatError."""
 
 
-def tokenize(raw: bytes, *, delimiter: str = ",", has_header: bool = True,
-             encoding: str = "utf-8-sig") -> dict:
+def tokenize(
+    raw: bytes, *, delimiter: str = ",", has_header: bool = True, encoding: str = "utf-8-sig"
+) -> dict:
     text = raw.decode(encoding)  # strict decoding: undecodable bytes anywhere are file-level
     if not text:
         raise FileLevelError("empty")
@@ -233,7 +269,9 @@ def tokenize(raw: bytes, *, delimiter: str = ",", has_header: bool = True,
                 positions.setdefault(h, []).append(i)
             dups = {h: p for h, p in positions.items() if len(p) > 1}
             if dups:
-                listed = ", ".join(f'"{h}" (columns {", ".join(map(str, p))})' for h, p in dups.items())
+                listed = ", ".join(
+                    f'"{h}" (columns {", ".join(map(str, p))})' for h, p in dups.items()
+                )
                 raise FileLevelError(f"duplicate header names: {listed}")
             if width > 500:
                 raise FileLevelError("too many columns")
@@ -241,7 +279,9 @@ def tokenize(raw: bytes, *, delimiter: str = ",", has_header: bool = True,
         if width is None:
             width = len(rec)  # no header: the first record sets the width (Q4-d)
         if len(rec) != width:
-            records.append(("bad", f"expected {width} fields, found {len(rec)}", delimiter.join(rec)[:500]))
+            records.append(
+                ("bad", f"expected {width} fields, found {len(rec)}", delimiter.join(rec)[:500])
+            )
         else:
             records.append(("ok", None, None))
     if (has_header and header is None) or not records and has_header:
@@ -249,24 +289,41 @@ def tokenize(raw: bytes, *, delimiter: str = ",", has_header: bool = True,
     if not records:
         raise FileLevelError("empty")
     bad = [(n, m, v) for n, (k, m, v) in enumerate(records, 1) if k == "bad"]
-    return {"row_count": len(records), "well_formed_count": len(records) - len(bad), "bad": bad,
-            "width": width, "header": header}
+    return {
+        "row_count": len(records),
+        "well_formed_count": len(records) - len(bad),
+        "bad": bad,
+        "width": width,
+        "header": header,
+    }
 
 
 STRUCTURE_FILES = [
-    name for name, entry in EXPECTED["formats"].items()
-    if isinstance(entry, dict) and ("parse_errors" in entry or entry.get("outcome") == "CsvFormatError")
+    name
+    for name, entry in EXPECTED["formats"].items()
+    if isinstance(entry, dict)
+    and ("parse_errors" in entry or entry.get("outcome") == "CsvFormatError")
     and name.endswith(".csv")
 ]
 
 
 def test_structure_fixture_list_is_complete() -> None:
     assert set(STRUCTURE_FILES) >= {
-        "ragged_rows.csv", "duplicate_headers.csv", "empty_header.csv", "empty_header_trailing.csv",
-        "empty_and_duplicate_header.csv", "unterminated_quote.csv", "stray_quote.csv",
-        "literal_quote.csv", "trailing_delimiter_first_row.csv", "quoted_multiline_ragged.csv",
-        "blank_lines_ragged.csv", "headerless_ragged.csv", "headerless_ragged_first_short.csv",
-        "malformed_chunk_straddle.csv", "parse_error_dedupe.csv",
+        "ragged_rows.csv",
+        "duplicate_headers.csv",
+        "empty_header.csv",
+        "empty_header_trailing.csv",
+        "empty_and_duplicate_header.csv",
+        "unterminated_quote.csv",
+        "stray_quote.csv",
+        "literal_quote.csv",
+        "trailing_delimiter_first_row.csv",
+        "quoted_multiline_ragged.csv",
+        "blank_lines_ragged.csv",
+        "headerless_ragged.csv",
+        "headerless_ragged_first_short.csv",
+        "malformed_chunk_straddle.csv",
+        "parse_error_dedupe.csv",
     }
 
 
@@ -299,20 +356,33 @@ def test_structure_rules_spot_checks() -> None:
     f = EXPECTED["formats"]
     # rule 4: only the faulty record is rejected, the next one parses; a literal quote is data
     assert [e["row_number"] for e in f["stray_quote.csv"]["parse_errors"]] == [2]
-    assert f["literal_quote.csv"]["parse_errors"] == [] and f["literal_quote.csv"]["cell_row_1_name"] == 'ab"c'
+    assert (
+        f["literal_quote.csv"]["parse_errors"] == []
+        and f["literal_quote.csv"]["cell_row_1_name"] == 'ab"c'
+    )
     assert rows("literal_quote.csv")[1][1] == 'ab"c'
-    # rule 2: the trailing delimiter is a third (empty) field; row numbering starts at the first data row
+    # rule 2: the trailing delimiter is a third (empty) field; numbering starts at the first row
     assert f["trailing_delimiter_first_row.csv"]["parse_errors"][0]["row_number"] == 1
     # rule 6/7: blank lines consume no row number; whitespace-only line is a record
     blank = (CSV / "blank_lines_ragged.csv").read_text().split("\n")
-    assert blank.count("") - 1 == f["blank_lines_ragged.csv"]["blank_lines"]  # last "" is the final newline
+    assert (
+        blank.count("") - 1 == f["blank_lines_ragged.csv"]["blank_lines"]
+    )  # last "" is the final newline
     assert " " in blank
     # multi-line quoted record counts once: more physical lines than records + header
     lines = (CSV / "quoted_multiline_ragged.csv").read_text().count("\n")
-    assert lines == f["quoted_multiline_ragged.csv"]["physical_lines"] > f["quoted_multiline_ragged.csv"]["row_count"] + 1
+    assert (
+        lines
+        == f["quoted_multiline_ragged.csv"]["physical_lines"]
+        > f["quoted_multiline_ragged.csv"]["row_count"] + 1
+    )
     # Q4-d: width from the first record even when it is the odd one out
     assert f["headerless_ragged_first_short.csv"]["expected_width"] == 2
-    assert [e["row_number"] for e in f["headerless_ragged_first_short.csv"]["parse_errors"]] == [2, 3, 4]
+    assert [e["row_number"] for e in f["headerless_ragged_first_short.csv"]["parse_errors"]] == [
+        2,
+        3,
+        4,
+    ]
     # rule 1: empty names are reported before duplicates
     assert "empty" in f["empty_and_duplicate_header.csv"]["message"]
 
@@ -334,11 +404,13 @@ def structure_counters(name: str, chunk: int, *, dedup_col: int | None = None) -
     raw = (CSV / name).read_bytes()
     want = EXPECTED["formats"][name]
     bad = {e["row_number"] for e in want["parse_errors"]}
-    data = [r for r in csv.reader(io.StringIO(raw.decode("utf-8"), newline=""), strict=False) if r][1:]
+    data = [r for r in csv.reader(io.StringIO(raw.decode("utf-8"), newline=""), strict=False) if r][
+        1:
+    ]
     c = dict.fromkeys(COUNTERS, 0)
     seen: set[str] = set()
     for start in range(0, len(data), chunk):
-        for offset, r in enumerate(data[start:start + chunk]):
+        for offset, r in enumerate(data[start : start + chunk]):
             n = start + offset + 1
             c["extracted_count"] += 1
             if n in bad:
@@ -357,10 +429,14 @@ def test_parse_error_scenarios_reconcile_for_every_chunk_size() -> None:
     straddle = EXPECTED["malformed_chunk_straddle.csv"]
     dedupe = EXPECTED["parse_error_dedupe.csv"]
     for size in straddle["chunk_sizes"]:
-        assert structure_counters("malformed_chunk_straddle.csv", size) == \
-            straddle["counters_identical_for_every_chunk_size"], size
+        assert (
+            structure_counters("malformed_chunk_straddle.csv", size)
+            == straddle["counters_identical_for_every_chunk_size"]
+        ), size
         assert structure_counters("ragged_rows.csv", size) == ragged["counters"], size
-        assert structure_counters("parse_error_dedupe.csv", size, dedup_col=0) == dedupe["counters"], size
+        assert (
+            structure_counters("parse_error_dedupe.csv", size, dedup_col=0) == dedupe["counters"]
+        ), size
     assert ragged["counters"]["rejected_count"] == 3 == len(ragged["rejected_row_numbers"])
     assert dedupe["counters"]["rejected_count"] == 1 and dedupe["counters"]["loaded_count"] == 3
 
@@ -371,7 +447,9 @@ def test_chunk_straddle_pairs_and_cumulative_counters() -> None:
     bad = {e["row_number"] for e in f["parse_errors"]}
     assert [r for c in chunks for r in c] == list(range(1, f["row_count"] + 1))
     assert all(len(c) <= 2 for c in chunks)
-    assert {2, 3} <= bad and 2 in chunks[0] and 3 in chunks[1]  # malformed rows on both sides of a boundary
+    assert (
+        {2, 3} <= bad and 2 in chunks[0] and 3 in chunks[1]
+    )  # malformed rows on both sides of a boundary
     cumulative = EXPECTED["malformed_chunk_straddle.csv"]["cumulative_after_each_chunk_rows_2"]
     seen = rejected = 0
     for chunk, snap in zip(chunks, cumulative, strict=True):
@@ -385,7 +463,9 @@ def test_fail_run_scenario_fails_on_first_parse_error() -> None:
     sc = EXPECTED["ragged_rows.csv"]["scenarios"]["pipelines/ragged_failrun.json"]
     assert sc["outcome"] == "failed" and sc["loaded_count"] == 0
     first_bad = min(e["row_number"] for e in EXPECTED["formats"]["ragged_rows.csv"]["parse_errors"])
-    assert sc["first_rejection"] == {"row_number": first_bad, "rule": "parse_error"} and first_bad == 2
+    assert (
+        sc["first_rejection"] == {"row_number": first_bad, "rule": "parse_error"} and first_bad == 2
+    )
     cfg = json.loads((HERE / "pipelines" / "ragged_failrun.json").read_text())
     assert cfg["on_validation_failure"] == "fail_run" and "max_rejected_ratio" not in cfg
     # Q7-3: only completed chunks are reported; the chunk holding row 2 never is
@@ -438,7 +518,11 @@ def test_no_committed_csv_has_an_empty_header_unless_expected() -> None:
         if path.name in allowed | headerless or path.stat().st_size == 0:
             continue
         raw = path.read_bytes()
-        enc = "latin-1" if path.name in {"latin1.csv", "cp1252.csv", "invalid_utf8.csv"} else "utf-8-sig"
+        enc = (
+            "latin-1"
+            if path.name in {"latin1.csv", "cp1252.csv", "invalid_utf8.csv"}
+            else "utf-8-sig"
+        )
         try:
             header = next(csv.reader(io.StringIO(raw.decode(enc), newline="")))
         except (UnicodeDecodeError, StopIteration):
