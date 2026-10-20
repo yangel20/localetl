@@ -3,7 +3,7 @@
 Updated 2026-10-20 by the orchestrator. Read this first; `docs/task-board.md` has detail, `SESSION_HANDOFF.md` is the 2026-10-19 history.
 
 ## Main
-- `main` = see `git log -1` (last milestone: BE-06 + QA-05e merge `7b46edb`). `scripts/test-all.sh` 16/16 green.
+- `main` = see `git log -1` (last milestone: QA-07 merge `d8e957b` + review records `af3264b`). `scripts/test-all.sh` 16/16 green.
 - Shared Postgres: compose project `localetl`, container `localetl-db-1`, `127.0.0.1:55432`. Start with `POSTGRES_PORT=55432 scripts/dev-up.sh` (use `docker compose up -d --pull never db` first if offline). Tests use throwaway DBs.
 - Full check: `PYTHON=<venv>/bin/python DATABASE_URL=…:55432/localetl TEST_DATABASE_URL=…:55432/localetl_test scripts/test-all.sh`. Install: `pip install -e 'backend[dev]'`.
 
@@ -13,7 +13,8 @@ ETL-01, 02, 03, 03b, 04, 05, 06, 07 (engine complete) · BE-01, 01b, 02, 03, 04,
 ## Active
 | Ticket | Owner | State |
 |---|---|---|
-| QA-07 | qa | in progress (Wave 1 exit gate) |
+| QA-05f | qa | conftest engine-cache fix (small follow-up) |
+| Wave 1 exit | user | all tickets Done, test-all green, QA-07 PASS; remaining exit criterion: no open contract proposals (Q12-1) + open decisions Q8-2..12, Q9, Q10, Q12 |
 | Wave 2 (WK-01..03, VIZ-01..02, QA-08) | — | not started; after QA-07 PASS |
 
 ## Decided (binding, in architecture §5/§6, contracts)
