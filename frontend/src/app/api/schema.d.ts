@@ -933,6 +933,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description Unexpected server condition, e.g. a data source's stored file or a dataset's published table is missing. `code` = `internal_error`; no internal detail is exposed. */
+        InternalError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description Upload exceeds LOCALETL_MAX_UPLOAD_MB. `code` = `payload_too_large`. */
         PayloadTooLarge: {
             headers: {
@@ -1058,6 +1067,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     deleteSource: {
@@ -1080,6 +1090,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     previewSource: {
@@ -1106,6 +1117,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
+            500: components["responses"]["InternalError"];
         };
     };
     listPipelines: {
@@ -1206,6 +1218,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     updatePipeline: {
@@ -1257,6 +1270,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     createRun: {
@@ -1281,6 +1295,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listRuns: {
@@ -1330,6 +1345,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listRunEvents: {
@@ -1353,6 +1369,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listRunRejections: {
@@ -1427,6 +1444,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listDatasetRows: {
@@ -1457,6 +1475,7 @@ export interface operations {
             };
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
+            500: components["responses"]["InternalError"];
         };
     };
     getDatasetProfile: {
@@ -1480,6 +1499,8 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+            500: components["responses"]["InternalError"];
         };
     };
     getMetricsSummary: {
