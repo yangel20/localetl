@@ -31,6 +31,12 @@ def counters(extracted: int, loaded: int, rejected: int = 0, dup: int = 0, null:
     return dict(zip(COUNTERS, (extracted, loaded, rejected, dup, null), strict=True))
 
 
+def partial(extracted: int, rejected: int = 0, dup: int = 0, null: int = 0) -> dict[str, int]:
+    """Counters of an unsuccessful run (architecture section 5 rule 7): ``loaded_count`` is 0 and the
+    reconciliation identity is not enforced (rows seen so far may still be staged)."""
+    return dict(zip(COUNTERS, (extracted, 0, rejected, dup, null), strict=True))
+
+
 def write(name: str, data: bytes) -> None:
     (CSV_DIR / name).write_bytes(data)
 
@@ -272,13 +278,208 @@ def build_formats(expected: dict[str, Any]) -> None:
         "crlf.csv": {"rows": 3, "columns": 4},
         "quoted_multiline.csv": {"rows": 3, "columns": 2},
         "no_header.csv": {"has_header": False, "rows": 3, "columns": ["column_1", "column_2", "column_3"]},
-        "ragged_rows.csv": "malformed: data row 3 has an extra field (parse_error); rows 2 and 5 are short",
-        "duplicate_headers.csv": "duplicate header names id, name; engine behaviour must be defined by ETL tests",
+        "ragged_rows.csv": structure(
+            6, [2, 3, 5],
+            [("expected 3 fields, found 2", "2,Bob"), ("expected 3 fields, found 4", "3,Cy,30,EXTRA"),
+             ("expected 3 fields, found 1", "5")]),
+        "duplicate_headers.csv": file_error(
+            'duplicate header names: "id" (columns 1, 5), "name" (columns 2, 3)'),
         "blank_lines.csv": {"rows": 3},
         "all_null_column.csv": {"null_count": {"empty_col": 3}},
         "hostile_columns.csv": "16 columns with SQL-injection-like / non-identifier names; "
                                "target names must be user-chosen safe identifiers",
     }
+
+
+def structure(records: int, bad_rows: list[int], errors: list[tuple[str, str | None]], *,
+              has_header: bool = True, **extra: Any) -> dict[str, Any]:
+    """Expected tokenization result per architecture section 5 "CSV structure and malformed input".
+
+    ``records`` = data records (header and blank lines excluded) = DataSource.row_count;
+    ``bad_rows`` = their 1-based ordinals; ``errors`` = (message, value) per bad row, in order.
+    ``value`` None means "not specified by the architecture" (quoting faults, see README)."""
+    assert len(bad_rows) == len(errors)
+    return {
+        "has_header": has_header,
+        "row_count": records,
+        "well_formed_count": records - len(bad_rows),
+        "parse_errors": [
+            {"row_number": n, "rule": "parse_error", "column": None, "message": m, "value": v}
+            for n, (m, v) in zip(bad_rows, errors, strict=True)
+        ],
+        **extra,
+    }
+
+
+def file_error(message: str | None, **extra: Any) -> dict[str, Any]:
+    """Expected file-level rejection (CsvFormatError); ``message`` None = wording not specified."""
+    return {"outcome": "CsvFormatError", "message": message, **extra}
+
+
+LONG_FIELD_LIMIT = 131_072  # csv.field_size_limit() default; architecture section 5, rule 5
+
+
+def build_structure(expected: dict[str, Any]) -> None:
+    """QA-03c: concrete CSV-structure fixtures (decision Q4, architecture section 5)."""
+    f = expected["formats"]
+    two = "expected 2 fields, found {}"
+    three = "expected 3 fields, found {}"
+
+    # -- file-level: header faults (rule 1, Q4-a)
+    write("empty_header.csv", b"id,,amount\n1,a,2\n")
+    f["empty_header.csv"] = file_error("header in column 2 is empty")
+    write("empty_header_trailing.csv", b"id,name,\n1,a,2\n")
+    f["empty_header_trailing.csv"] = file_error("header in column 3 is empty")
+    write("empty_and_duplicate_header.csv", b"id,,id,\n1,a,2,3\n")
+    f["empty_and_duplicate_header.csv"] = file_error(
+        "header in column 2 is empty", note="empty names are reported before duplicates")
+
+    # -- file-level: unrecoverable quoting (rule 5)
+    write("unterminated_quote.csv", b'id,name\n1,"abc\n2,def\n3,ghi\n')
+    f["unterminated_quote.csv"] = file_error(
+        None, note="quoted field still open at end of file; message wording not specified")
+    f["long_field (generated in the test, not committed)"] = file_error(
+        None, field_length_rejected=LONG_FIELD_LIMIT + 1, field_length_accepted=LONG_FIELD_LIMIT,
+        note="a single field longer than 131,072 characters")
+
+    # -- row-level quoting faults (rule 4)
+    write("stray_quote.csv", b'id,name,amount\n1,Ana,10\n2,"Bob"x,20\n3,Cy,30\n')
+    f["stray_quote.csv"] = structure(
+        3, [2], [("quoting fault", None)],
+        note="characters after a closing quote: only that record is rejected, row 3 parses; "
+             "csv.reader yields no fields for it, so rule 8's value is unspecified (null here)")
+    write("literal_quote.csv", b'id,name\n1,ab"c\n2,plain\n')
+    f["literal_quote.csv"] = structure(
+        2, [], [], note='a quote inside an unquoted field is literal data (ab"c), not an error',
+        cell_row_1_name='ab"c')
+
+    # -- width faults (rules 2 and 3, 6, 7)
+    write("trailing_delimiter_first_row.csv", b"id,name\n1,a,\n2,b\n3,c\n")
+    f["trailing_delimiter_first_row.csv"] = structure(
+        3, [1], [(two.format(3), "1,a,")],
+        note="empty trailing field is not trimmed; the first data row must not shift columns")
+    write("quoted_multiline_ragged.csv",
+          b'id,note\n1,"line one\nline two"\n2,plain\n3\n4,"x\ny","extra"\n5,ok\n')
+    f["quoted_multiline_ragged.csv"] = structure(
+        5, [3, 4], [(two.format(1), "3"), (two.format(3), "4,x\ny,extra")],
+        physical_lines=8,
+        note="a multi-line quoted field is one record; row numbers are record ordinals, not lines")
+    write("blank_lines_ragged.csv", b"id,name\n1,a\n\n2\n\n3,c,d\n\n4,e\n \n5,f\n")
+    f["blank_lines_ragged.csv"] = structure(
+        6, [2, 3, 5], [(two.format(1), "2"), (two.format(3), "3,c,d"), (two.format(1), " ")],
+        blank_lines=3,
+        note="blank lines are not records and consume no row number; a whitespace-only line is a "
+             "one-field record (here too short)")
+
+    # -- no header: width comes from the first record (rule 1 note, Q4-d)
+    write("headerless_ragged.csv", b"1,Ana,10\n2,Bob\n3,Cy,30,X\n4,Di,40\n")
+    f["headerless_ragged.csv"] = structure(
+        4, [2, 3], [(three.format(2), "2,Bob"), (three.format(4), "3,Cy,30,X")], has_header=False,
+        expected_width=3, columns=["column_1", "column_2", "column_3"])
+    write("headerless_ragged_first_short.csv", b"1,Ana\n2,Bob,20\n3,Cy,30\n4,Di,40\n")
+    f["headerless_ragged_first_short.csv"] = structure(
+        4, [2, 3, 4],
+        [(two.format(3), "2,Bob,20"), (two.format(3), "3,Cy,30"), (two.format(3), "4,Di,40")],
+        has_header=False, expected_width=2, columns=["column_1", "column_2"],
+        note="Q4-d: the first record sets the width even though it is the odd one out")
+
+    # -- chunking: malformed records straddling chunk_rows=2 boundaries (Chunks rules)
+    write("malformed_chunk_straddle.csv",
+          b"id,name,amount\n1,Ana,10\n2,Bob\n3,Cy,30,X\n4,Di,40\n5,Ed,50\n6,Flo\n7,Gus,70\n")
+    f["malformed_chunk_straddle.csv"] = structure(
+        7, [2, 3, 6],
+        [(three.format(2), "2,Bob"), (three.format(4), "3,Cy,30,X"), (three.format(2), "6,Flo")],
+        chunk_rows_2_chunks=[[1, 2], [3, 4], [5, 6], [7]],
+        note="with chunk_rows=2 rows 2|3 (both malformed) straddle a boundary; chunk_rows counts "
+             "records, so boundaries do not depend on which records are malformed")
+
+    # -- rule 9: a parse_error row never registers a deduplicate key
+    write("parse_error_dedupe.csv", b"id,name\n1,a\n2,b,EXTRA\n2,c\n3,d\n1,e\n")
+    f["parse_error_dedupe.csv"] = structure(
+        5, [2], [(two.format(3), "2,b,EXTRA")],
+        note="row 2 is malformed and registers no key, so row 3 (same id 2) is loaded; row 5 "
+             "repeats id 1 and is duplicate-dropped")
+
+
+def build_structure_scenarios(expected: dict[str, Any]) -> None:
+    """Pipeline scenarios over the structure fixtures: counters reconcile; fail_run on parse_error."""
+    cfg = "pipelines/ragged_reject.json"
+    expected["ragged_rows.csv"] = {
+        "config": cfg,
+        "note": "3 of 6 records are parse_error (ratio 0.5 <= max_rejected_ratio 0.6)",
+        "outcome": "succeeded",
+        "counters": counters(6, 3, rejected=3),
+        "rejections_by_rule": {"parse_error": 3},
+        "rejected_row_numbers": [2, 3, 5],
+        "scenarios": {
+            "pipelines/ragged_failrun.json": {
+                "note": "fail_run: the first parse_error (row 2) raises RejectionLimitExceeded "
+                        "(Q4-b); the failing chunk is never reported as completed (Q7-3)",
+                "outcome": "failed", "loaded_count": 0,
+                "first_rejection": {"row_number": 2, "rule": "parse_error"},
+                "counters_at_failure_by_chunk_rows": {
+                    "50000": partial(0), "2": partial(0), "1": partial(1),
+                },
+            },
+        },
+    }
+    expected["malformed_chunk_straddle.csv"] = {
+        "config": "pipelines/ragged_reject.json",
+        "note": "3 of 7 records are parse_error; counters identical for every chunk_rows",
+        "outcome": "succeeded",
+        "chunk_sizes": [1, 2, 3, 50_000],
+        "counters_identical_for_every_chunk_size": counters(7, 4, rejected=3),
+        "rejected_row_numbers": [2, 3, 6],
+        "cumulative_after_each_chunk_rows_2": [
+            # extracted, rejected after chunks [1,2] [3,4] [5,6] [7]; loaded stays 0 until publish
+            {"extracted_count": 2, "rejected_count": 1},
+            {"extracted_count": 4, "rejected_count": 2},
+            {"extracted_count": 6, "rejected_count": 3},
+            {"extracted_count": 7, "rejected_count": 3},
+        ],
+    }
+    expected["parse_error_dedupe.csv"] = {
+        "config": "pipelines/parse_error_dedupe.json",
+        "note": "deduplicate(id): parse_error row 2 never registers key 2 (first removal wins)",
+        "outcome": "succeeded",
+        "counters": counters(5, 3, rejected=1, dup=1),
+        "rejections_by_rule": {"parse_error": 1},
+        "rejected_row_numbers": [2],
+        "duplicate_dropped_row_numbers": [5],
+    }
+
+
+def build_structure_pipelines() -> None:
+    out = HERE / "pipelines"
+
+    def dump(name: str, cfg: dict[str, Any]) -> None:
+        (out / name).write_text(json.dumps(cfg, indent=2) + "\n")
+
+    ragged = {
+        "version": 1,
+        "columns": [
+            {"source": "id", "name": "id", "type": "integer", "nullable": False},
+            {"source": "name", "name": "name", "type": "string"},
+            {"source": "amount", "name": "amount", "type": "integer"},
+        ],
+        "on_validation_failure": "reject_row",
+        "max_rejected_ratio": 0.6,
+        "target": {"table": "ragged", "mode": "replace"},
+    }
+    dump("ragged_reject.json", ragged)
+    failrun = json.loads(json.dumps(ragged))
+    failrun["on_validation_failure"] = "fail_run"
+    failrun.pop("max_rejected_ratio")
+    dump("ragged_failrun.json", failrun)
+    dump("parse_error_dedupe.json", {
+        "version": 1,
+        "columns": [
+            {"source": "id", "name": "id", "type": "integer", "nullable": False},
+            {"source": "name", "name": "name", "type": "string"},
+        ],
+        "transformations": [{"op": "deduplicate", "columns": ["id"]}],
+        "target": {"table": "dedupe", "mode": "replace"},
+    })
 
 
 def build_pipelines() -> None:
@@ -330,6 +531,9 @@ def main() -> None:
     expected: dict[str, Any] = {"_comment": "Generated by build_fixtures.py. Do not edit by hand."}
     build_orders(expected)
     build_formats(expected)
+    build_structure(expected)
+    build_structure_pipelines()
+    build_structure_scenarios(expected)
     (HERE / "expected.json").write_text(json.dumps(expected, indent=2, ensure_ascii=False) + "\n")
     print(f"wrote {len(list(CSV_DIR.iterdir()))} csv fixtures")
 

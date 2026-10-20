@@ -244,8 +244,38 @@
         "column_3"
       ]
     },
-    "ragged_rows.csv": "malformed: data row 3 has an extra field (parse_error); rows 2 and 5 are short",
-    "duplicate_headers.csv": "duplicate header names id, name; engine behaviour must be defined by ETL tests",
+    "ragged_rows.csv": {
+      "has_header": true,
+      "row_count": 6,
+      "well_formed_count": 3,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 2",
+          "value": "2,Bob"
+        },
+        {
+          "row_number": 3,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 4",
+          "value": "3,Cy,30,EXTRA"
+        },
+        {
+          "row_number": 5,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 1",
+          "value": "5"
+        }
+      ]
+    },
+    "duplicate_headers.csv": {
+      "outcome": "CsvFormatError",
+      "message": "duplicate header names: \"id\" (columns 1, 5), \"name\" (columns 2, 3)"
+    },
     "blank_lines.csv": {
       "rows": 3
     },
@@ -254,6 +284,360 @@
         "empty_col": 3
       }
     },
-    "hostile_columns.csv": "16 columns with SQL-injection-like / non-identifier names; target names must be user-chosen safe identifiers"
+    "hostile_columns.csv": "16 columns with SQL-injection-like / non-identifier names; target names must be user-chosen safe identifiers",
+    "empty_header.csv": {
+      "outcome": "CsvFormatError",
+      "message": "header in column 2 is empty"
+    },
+    "empty_header_trailing.csv": {
+      "outcome": "CsvFormatError",
+      "message": "header in column 3 is empty"
+    },
+    "empty_and_duplicate_header.csv": {
+      "outcome": "CsvFormatError",
+      "message": "header in column 2 is empty",
+      "note": "empty names are reported before duplicates"
+    },
+    "unterminated_quote.csv": {
+      "outcome": "CsvFormatError",
+      "message": null,
+      "note": "quoted field still open at end of file; message wording not specified"
+    },
+    "long_field (generated in the test, not committed)": {
+      "outcome": "CsvFormatError",
+      "message": null,
+      "field_length_rejected": 131073,
+      "field_length_accepted": 131072,
+      "note": "a single field longer than 131,072 characters"
+    },
+    "stray_quote.csv": {
+      "has_header": true,
+      "row_count": 3,
+      "well_formed_count": 2,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "quoting fault",
+          "value": null
+        }
+      ],
+      "note": "characters after a closing quote: only that record is rejected, row 3 parses; csv.reader yields no fields for it, so rule 8's value is unspecified (null here)"
+    },
+    "literal_quote.csv": {
+      "has_header": true,
+      "row_count": 2,
+      "well_formed_count": 2,
+      "parse_errors": [],
+      "note": "a quote inside an unquoted field is literal data (ab\"c), not an error",
+      "cell_row_1_name": "ab\"c"
+    },
+    "trailing_delimiter_first_row.csv": {
+      "has_header": true,
+      "row_count": 3,
+      "well_formed_count": 2,
+      "parse_errors": [
+        {
+          "row_number": 1,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "1,a,"
+        }
+      ],
+      "note": "empty trailing field is not trimmed; the first data row must not shift columns"
+    },
+    "quoted_multiline_ragged.csv": {
+      "has_header": true,
+      "row_count": 5,
+      "well_formed_count": 3,
+      "parse_errors": [
+        {
+          "row_number": 3,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 1",
+          "value": "3"
+        },
+        {
+          "row_number": 4,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "4,x\ny,extra"
+        }
+      ],
+      "physical_lines": 8,
+      "note": "a multi-line quoted field is one record; row numbers are record ordinals, not lines"
+    },
+    "blank_lines_ragged.csv": {
+      "has_header": true,
+      "row_count": 6,
+      "well_formed_count": 3,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 1",
+          "value": "2"
+        },
+        {
+          "row_number": 3,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "3,c,d"
+        },
+        {
+          "row_number": 5,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 1",
+          "value": " "
+        }
+      ],
+      "blank_lines": 3,
+      "note": "blank lines are not records and consume no row number; a whitespace-only line is a one-field record (here too short)"
+    },
+    "headerless_ragged.csv": {
+      "has_header": false,
+      "row_count": 4,
+      "well_formed_count": 2,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 2",
+          "value": "2,Bob"
+        },
+        {
+          "row_number": 3,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 4",
+          "value": "3,Cy,30,X"
+        }
+      ],
+      "expected_width": 3,
+      "columns": [
+        "column_1",
+        "column_2",
+        "column_3"
+      ]
+    },
+    "headerless_ragged_first_short.csv": {
+      "has_header": false,
+      "row_count": 4,
+      "well_formed_count": 1,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "2,Bob,20"
+        },
+        {
+          "row_number": 3,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "3,Cy,30"
+        },
+        {
+          "row_number": 4,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "4,Di,40"
+        }
+      ],
+      "expected_width": 2,
+      "columns": [
+        "column_1",
+        "column_2"
+      ],
+      "note": "Q4-d: the first record sets the width even though it is the odd one out"
+    },
+    "malformed_chunk_straddle.csv": {
+      "has_header": true,
+      "row_count": 7,
+      "well_formed_count": 4,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 2",
+          "value": "2,Bob"
+        },
+        {
+          "row_number": 3,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 4",
+          "value": "3,Cy,30,X"
+        },
+        {
+          "row_number": 6,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 3 fields, found 2",
+          "value": "6,Flo"
+        }
+      ],
+      "chunk_rows_2_chunks": [
+        [
+          1,
+          2
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "note": "with chunk_rows=2 rows 2|3 (both malformed) straddle a boundary; chunk_rows counts records, so boundaries do not depend on which records are malformed"
+    },
+    "parse_error_dedupe.csv": {
+      "has_header": true,
+      "row_count": 5,
+      "well_formed_count": 4,
+      "parse_errors": [
+        {
+          "row_number": 2,
+          "rule": "parse_error",
+          "column": null,
+          "message": "expected 2 fields, found 3",
+          "value": "2,b,EXTRA"
+        }
+      ],
+      "note": "row 2 is malformed and registers no key, so row 3 (same id 2) is loaded; row 5 repeats id 1 and is duplicate-dropped"
+    }
+  },
+  "ragged_rows.csv": {
+    "config": "pipelines/ragged_reject.json",
+    "note": "3 of 6 records are parse_error (ratio 0.5 <= max_rejected_ratio 0.6)",
+    "outcome": "succeeded",
+    "counters": {
+      "extracted_count": 6,
+      "loaded_count": 3,
+      "rejected_count": 3,
+      "duplicate_dropped_count": 0,
+      "null_dropped_count": 0
+    },
+    "rejections_by_rule": {
+      "parse_error": 3
+    },
+    "rejected_row_numbers": [
+      2,
+      3,
+      5
+    ],
+    "scenarios": {
+      "pipelines/ragged_failrun.json": {
+        "note": "fail_run: the first parse_error (row 2) raises RejectionLimitExceeded (Q4-b); the failing chunk is never reported as completed (Q7-3)",
+        "outcome": "failed",
+        "loaded_count": 0,
+        "first_rejection": {
+          "row_number": 2,
+          "rule": "parse_error"
+        },
+        "counters_at_failure_by_chunk_rows": {
+          "50000": {
+            "extracted_count": 0,
+            "loaded_count": 0,
+            "rejected_count": 0,
+            "duplicate_dropped_count": 0,
+            "null_dropped_count": 0
+          },
+          "2": {
+            "extracted_count": 0,
+            "loaded_count": 0,
+            "rejected_count": 0,
+            "duplicate_dropped_count": 0,
+            "null_dropped_count": 0
+          },
+          "1": {
+            "extracted_count": 1,
+            "loaded_count": 0,
+            "rejected_count": 0,
+            "duplicate_dropped_count": 0,
+            "null_dropped_count": 0
+          }
+        }
+      }
+    }
+  },
+  "malformed_chunk_straddle.csv": {
+    "config": "pipelines/ragged_reject.json",
+    "note": "3 of 7 records are parse_error; counters identical for every chunk_rows",
+    "outcome": "succeeded",
+    "chunk_sizes": [
+      1,
+      2,
+      3,
+      50000
+    ],
+    "counters_identical_for_every_chunk_size": {
+      "extracted_count": 7,
+      "loaded_count": 4,
+      "rejected_count": 3,
+      "duplicate_dropped_count": 0,
+      "null_dropped_count": 0
+    },
+    "rejected_row_numbers": [
+      2,
+      3,
+      6
+    ],
+    "cumulative_after_each_chunk_rows_2": [
+      {
+        "extracted_count": 2,
+        "rejected_count": 1
+      },
+      {
+        "extracted_count": 4,
+        "rejected_count": 2
+      },
+      {
+        "extracted_count": 6,
+        "rejected_count": 3
+      },
+      {
+        "extracted_count": 7,
+        "rejected_count": 3
+      }
+    ]
+  },
+  "parse_error_dedupe.csv": {
+    "config": "pipelines/parse_error_dedupe.json",
+    "note": "deduplicate(id): parse_error row 2 never registers key 2 (first removal wins)",
+    "outcome": "succeeded",
+    "counters": {
+      "extracted_count": 5,
+      "loaded_count": 3,
+      "rejected_count": 1,
+      "duplicate_dropped_count": 1,
+      "null_dropped_count": 0
+    },
+    "rejections_by_rule": {
+      "parse_error": 1
+    },
+    "rejected_row_numbers": [
+      2
+    ],
+    "duplicate_dropped_row_numbers": [
+      5
+    ]
   }
 }
