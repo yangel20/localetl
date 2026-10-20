@@ -79,6 +79,7 @@ All read through `app.core.settings` (pydantic-settings) except the ETL engine, 
 | `WORKER_HEARTBEAT_SECONDS` | `10` | worker |
 | `WORKER_STALE_AFTER_SECONDS` | `60` | worker (crash recovery) |
 | `VITE_API_URL` | `http://127.0.0.1:8000/api/v1` | frontend |
+| `VITE_MAX_UPLOAD_MB` | `100` (same as `LOCALETL_MAX_UPLOAD_MB`; unset or invalid falls back to 100) | frontend, build time: early client-side size check only. `LOCALETL_MAX_UPLOAD_MB` is authoritative; the API still returns 413 above its own limit (decision Q8-1, 2026-10-20) |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `localetl` ×3 | docker-compose only |
 
 Uploads are stored as `${LOCALETL_DATA_DIR}/sources/<source_id>.csv`. Nothing under `data/` is committed.
