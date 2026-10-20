@@ -31,7 +31,7 @@ The API never runs pipelines. The frontend never touches the database. The ETL e
 |---|---|
 | Python | 3.11, `venv` + `pip`, single project at `backend/pyproject.toml` (packages `app`, `app.etl`, `app.worker`) |
 | Python libs | FastAPI, Pydantic v2, pydantic-settings, SQLAlchemy 2 (Core + ORM), psycopg 3, Alembic, pandas, jsonschema, python-multipart, uvicorn |
-| Python dev | pytest, mypy (`strict` for `app.etl`), ruff, httpx, pandas-stubs |
+| Python dev | pytest, mypy (`strict` for `app.etl`), ruff, httpx, pandas-stubs, PyYAML and openapi-spec-validator (contract tooling and the QA-05 conformance harness; added 2026-10-20) |
 | Node | ≥ 20 (developed on 23), npm, project at `frontend/package.json` |
 | Frontend libs | React 18, React Router 6, Tailwind CSS 3, Recharts 2, openapi-typescript (types generated from `contracts/openapi.yaml`) |
 | Frontend dev | Vite 5, Vitest, React Testing Library, ESLint, TypeScript strict |

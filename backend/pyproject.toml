@@ -27,6 +27,11 @@ dev = [
     "ruff>=0.5",
     "httpx>=0.27,<1",
     "pandas-stubs>=2.2",
+    # Contract tooling and the API conformance harness (QA-05, F10):
+    # PyYAML loads contracts/openapi.yaml; openapi-spec-validator backs
+    # contracts/tools/check_contracts.py. Test-only, never imported by app.
+    "pyyaml>=6,<7",
+    "openapi-spec-validator>=0.7,<0.10",
 ]
 
 [tool.setuptools.packages.find]
