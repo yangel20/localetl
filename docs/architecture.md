@@ -182,7 +182,7 @@ class RunResult:                   # row counters: see "Row outcome accounting" 
 
 # Errors
 class EtlError(Exception): ...
-class CsvFormatError(EtlError): ...          # empty, header-only, undecodable, too many columns, malformed
+class CsvFormatError(EtlError): ...          # file-level (Q4): empty, header-only, undecodable, > 500 columns, duplicate headers, unrecoverable structure
 class ConfigValidationError(EtlError):
     errors: list[ConfigErrorItem]
 class SourceMismatchError(EtlError): ...     # config references columns absent from the CSV
@@ -207,7 +207,7 @@ def run_pipeline(config: PipelineConfig,
 ```
 
 ### Behaviour contract
-- `inspect_csv` / `preview_csv` raise `CsvFormatError` for the cases in REQ-04. Type inference uses the same parsers as casting. When `has_header` is false, columns are named `column_1`, `column_2`, …
+- `inspect_csv` / `preview_csv` raise `CsvFormatError` for the file-level cases in REQ-04 and "CSV structure and malformed input" below. `inspect_csv` reads the whole file in one streaming pass (`row_count` needs it), so file-level faults anywhere in the file are found at upload. Type inference uses the same parsers as casting. When `has_header` is false, columns are named `column_1`, `column_2`, …
 - `validate_pipeline_config` validates against `contracts/pipeline.schema.json`, loaded from `Path(__file__).resolve().parents[3] / "contracts" / "pipeline.schema.json"` (override: `LOCALETL_PIPELINE_SCHEMA_PATH`, read by the caller and passed in only if needed). Then it applies the semantic rules in section 6. All problems are collected into one `ConfigValidationError`.
 - `run_pipeline` re-validates the config, then runs the stages in order, calling `on_event` with `started` and `completed`/`failed` for each stage (and `progress` per chunk). It checks `should_stop()` between chunks and stages and raises `RunInterrupted` (staging dropped, nothing published).
 - On any exception, the staging table is dropped and the published table is untouched.
@@ -237,10 +237,76 @@ Rules:
 8. Transform events report `rows_in`/`rows_out` per chunk. The difference equals the rows rejected at cast plus rows dropped by operations in that chunk.
 9. **Reporting.** Every `StageEvent` carries a cumulative `RunCounters` snapshot; `progress` events are emitted at least once per chunk. The final `publish`/`completed` event's counters equal the `RunResult` counters. Counters never decrease within a run.
 
+### CSV structure and malformed input (decision Q4, approved 2026-10-20)
+
+> Approved by the user 2026-10-20, with sub-decisions Q4-a to Q4-d as recommended (listed at the end of this section). Empty or duplicate header names reject the file; records with missing or extra fields are rejected as `parse_error`; unrecoverable quoting, decoding and structural failures are extraction errors.
+
+Terms. A **record** is one logical CSV row as tokenized with the source's `CsvOptions`; a quoted field may span several physical lines. The **expected width** is the number of fields in the header record (`has_header: true`) or in the first record (`has_header: false`). A **blank line** is a physical line with no characters before its line terminator; it is not a record.
+
+Every problem is either **file-level** or **row-level**:
+
+| Level | Raised as | Detected by | Effect |
+|---|---|---|---|
+| File | `CsvFormatError` | `inspect_csv` / `preview_csv`; `run_pipeline` extract | Upload: HTTP 422 `validation_error` with the error message, temp file deleted, no source created (§8). Run: run `failed` at `extract`, nothing published |
+| Row | `RejectedRow(rule="parse_error", column=None)` | `run_pipeline` extract | Row counts in `extracted_count` and `rejected_count`; the run continues per `on_validation_failure` |
+
+Rules:
+1. **Empty or duplicate header names → file-level (Q4-a).** Header values are compared exactly: case-sensitive, no trimming, after the BOM is removed by `utf-8-sig`. An empty header value is rejected first, with its 1-based position (`header in column 2 is empty`). Otherwise the message names every duplicated header with its 1-based column positions, e.g. `duplicate header names: "id" (columns 1, 5), "name" (columns 2, 3)`. Not applicable when `has_header` is false.
+2. **Too many fields → row-level `parse_error`.** Includes a trailing delimiter (`1,a,` against a 2-column header): empty trailing fields are not trimmed. Message: `expected N fields, found M`.
+3. **Too few fields → row-level `parse_error`.** A record with at least one but fewer than the expected fields is never padded with nulls. Message as in rule 2.
+4. **Recoverable quoting fault → row-level `parse_error`.** A fault confined to one record, such as characters after a closing quote (`"a"b`). Tokenizing resumes at the next line. A quote character inside an unquoted field (`ab"c`) is literal data, not an error.
+5. **Unrecoverable structure → file-level.** A quoted field still open at end of file; a single field longer than 131,072 characters (the tokenizer's field limit, almost always a runaway quote); bytes undecodable in the chosen encoding anywhere in the file. These join the existing REQ-04 cases: empty file, header-only (no records after the header), expected width over 500.
+6. **Blank lines** are skipped everywhere. They are not records, consume no row number and count in no counter. A whitespace-only line is a record with one field.
+7. **Row numbers.** `RejectedRow.row_number` is the 1-based ordinal of the record among data records (header and blank lines excluded), global across chunks. It is the same numbering every other rule uses.
+8. **`parse_error` entries** have `column = null` and `value` = the record's fields joined with the source delimiter, truncated to 500 characters. One entry per malformed record.
+9. **First removal wins (Q3 rule 1).** Extract is the first step, so a `parse_error` row reaches no later stage and never registers `deduplicate` or `unique` keys.
+
+Row outcome accounting (Q3) for these cases:
+
+| Case | `extracted_count` | `rejected_count` | Other counters | `RejectedRow` |
+|---|---|---|---|---|
+| Duplicate headers, unrecoverable structure (at upload) | n/a: no source, no run | n/a | n/a | none |
+| Too many / too few fields, recoverable quoting fault | +1 | +1 | unchanged | one, `parse_error` |
+| Blank line | 0 | 0 | 0 | none |
+| File-level fault found during a run | records of the whole chunks completed before the fault | same | `loaded_count = 0` | as emitted so far |
+
+- The identity `extracted = loaded + rejected + duplicate_dropped + null_dropped` holds unchanged; `parse_error` rows sit in `rejected_count`.
+- For a full run, `extracted_count` equals the source's `DataSource.row_count`.
+- `max_rejected_ratio` counts `parse_error` rows in the numerator and the denominator.
+- With `on_validation_failure: fail_run`, the first rejection of **any** kind (`parse_error`, `type_cast`, `not_null` or a validation rule) raises `RejectionLimitExceeded` (Q4-b).
+
+Chunks:
+- `chunk_rows` counts records, including malformed ones; blank lines are not counted. Chunk boundaries therefore depend only on the file, not on which records are malformed.
+- A record is never split across chunks, including a quoted field that spans several lines.
+- Malformed records are reported in the chunk where they occur. Counters are cumulative and identical for every `chunk_rows` (ETL-07 criterion).
+- A file-level fault found in chunk *k* fails the run at `extract`. Chunks before *k* are already reported; nothing is published (Q3 rule 7).
+- Because `inspect_csv` makes a full pass at upload, the run-time file-level path normally fires only if the stored file changed or was corrupted after upload.
+
+`inspect_csv` and `preview_csv`:
+- `row_count` counts every data record, malformed included, and excludes blank lines.
+- Type inference and `null_count` use the first `sample_rows` well-formed records.
+- `preview_csv` returns the first `limit` well-formed records. `sampled_rows` is the number of well-formed records examined.
+- **Preview limitation (Q4-c).** Malformed records are **excluded** from preview `rows`, from type inference and from `null_count`, because they cannot be keyed by column without guessing. They **are** counted in `row_count`. A source can therefore show a clean preview and still produce `parse_error` rejections when a pipeline runs; the preview does not report how many records are malformed. Documented in the contract (`CsvPreview`, `DataSource.row_count`, `ColumnInfo.null_count`) and REQ-05; no new contract field.
+
+Implementation constraint. Observed 2026-10-20 with pandas 2.3.3 on the QA-03 fixtures, `pandas.read_csv` cannot produce the outcomes above:
+- the default C parser fails the whole read on the first extra field;
+- both C and python engines pad short rows with nulls silently;
+- duplicate headers are renamed silently to `name.1`, `id.1`;
+- the python engine with `on_bad_lines` silently drops a record with an unterminated quote;
+- when the first data row has one extra field, the first column silently becomes the index, shifting every value one column.
+
+Extract therefore tokenizes with the stdlib `csv.reader(strict=True)`, using the source's delimiter and quote character, over a text stream opened with `newline=""` and strict decoding. Each chunk is built as a pandas DataFrame of strings. No new dependency. Internal structure stays the ETL engineer's choice, as long as this behaviour holds and is tested.
+
+Decisions (user, 2026-10-20):
+- **Q4-a:** empty header names reject the file, like duplicates (rule 1).
+- **Q4-b:** `fail_run` triggers on the first rejection of any kind, `parse_error` included.
+- **Q4-c:** malformed records are excluded from preview and inference but included in `row_count`; the limitation is documented (above). No `malformed_row_count` field.
+- **Q4-d:** without a header, the expected width is the field count of the first record. If that record is malformed, the others are rejected; this is accepted.
+
 ### Stage semantics
-1. **extract**: `pandas.read_csv(..., dtype=str, keep_default_na=False, chunksize=chunk_rows)` with the given options. Empty strings become null. Malformed rows → `parse_error` rejection.
+1. **extract**: tokenize the file per "CSV structure and malformed input" (stdlib `csv` reader, strict quoting) into chunks of `chunk_rows` records, kept as strings. Empty strings become null. Malformed records → `parse_error` rejection; unrecoverable structure → `CsvFormatError`.
 2. **transform**: (a) select `columns[].source` and rename to `columns[].name`; (b) cast to `columns[].type` (whitespace stripped before casting non-string types; `format` used for date/datetime; booleans accept `true/false/1/0/yes/no`, case-insensitive); cast failures → `type_cast` rejection; `nullable: false` nulls → `not_null` rejection; (c) apply `transformations` in array order.
-3. **validate**: apply each `validations` rule; each failing row yields one `RejectedRow` entry per failing rule and counts once in `rejected_count`. `unique` and `deduplicate` track seen keys across chunks. With `on_validation_failure: fail_run`, the first rejection raises `RejectionLimitExceeded`. After all chunks, if `rejected_count / extracted_count > max_rejected_ratio`, raise `RejectionLimitExceeded`.
+3. **validate**: apply each `validations` rule; each failing row yields one `RejectedRow` entry per failing rule and counts once in `rejected_count`. `unique` and `deduplicate` track seen keys across chunks. With `on_validation_failure: fail_run`, the first rejection of any kind in the run (parse, cast, `not_null` or a validation rule; Q4-b) raises `RejectionLimitExceeded`. After all chunks, if `rejected_count / extracted_count > max_rejected_ratio`, raise `RejectionLimitExceeded`.
 4. **load**: rows are appended to `staging.run_<run_id hex>`, created with column types from section 7.3.
 5. **publish** (one transaction): `replace` → drop `datasets.<table>` if present, then `ALTER TABLE staging.run_<hex> SET SCHEMA datasets` and rename it to `<table>`. `append` → create `datasets.<table>` like staging if absent; otherwise require an identical column name/type list (else `LoadError`), then `INSERT INTO datasets.<table> SELECT * FROM staging...` and drop staging.
 
