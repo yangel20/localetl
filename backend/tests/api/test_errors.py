@@ -80,3 +80,11 @@ def test_unhandled_is_internal_error_without_leak(client: TestClient) -> None:
 def test_json_pointer_escaping() -> None:
     assert json_pointer(("body", "a/b", "c~d", 0)) == "/a~1b/c~0d/0"
     assert json_pointer(("body",)) == "/body"
+
+
+def test_method_not_allowed_keeps_allow_header() -> None:
+    resp = TestClient(create_app()).delete("/api/v1/health")
+    assert resp.status_code == 405
+    body = resp.json()["error"]
+    assert body["code"] == "method_not_allowed"
+    assert "GET" in resp.headers["allow"]

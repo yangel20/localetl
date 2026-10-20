@@ -1,6 +1,7 @@
 """Contract `Error` responses (contracts/openapi.yaml, components.schemas.Error)."""
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _CODE_BY_STATUS: dict[int, str] = {
     404: "not_found",
+    405: "method_not_allowed",
     409: "conflict",
     413: "payload_too_large",
     415: "unsupported_media_type",
@@ -54,8 +56,10 @@ def json_pointer(loc: tuple[Any, ...] | list[Any]) -> str:
     return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in parts)
 
 
-def _response(status: int, body: dict[str, Any]) -> JSONResponse:
-    return JSONResponse(status_code=status, content=body)
+def _response(
+    status: int, body: dict[str, Any], headers: Mapping[str, str] | None = None
+) -> JSONResponse:
+    return JSONResponse(status_code=status, content=body, headers=dict(headers or {}))
 
 
 async def _api_error(_: Request, exc: Exception) -> JSONResponse:
@@ -73,12 +77,13 @@ async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
 
 async def _http_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, StarletteHTTPException)
-    # Contract has no code for e.g. 405; report it as validation_error rather than invent one.
+    # Other unmapped 4xx fall back to validation_error; 5xx to internal_error.
     code = _CODE_BY_STATUS.get(
         exc.status_code, "internal_error" if exc.status_code >= 500 else "validation_error"
     )
     message = "Resource not found" if exc.status_code == 404 else str(exc.detail)
-    return _response(exc.status_code, error_body(code, message))
+    # Keep exception headers (e.g. Allow on 405).
+    return _response(exc.status_code, error_body(code, message), exc.headers)
 
 
 async def _unhandled(_: Request, exc: Exception) -> JSONResponse:
