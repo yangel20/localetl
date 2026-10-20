@@ -11,7 +11,7 @@ import { emptyDraft, PipelineForm, type PipelineDraft } from './PipelineForm';
 type Overrides = Parameters<typeof createMockFetch>[0];
 const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { 'Content-Type': 'application/json' } });
 
-function setup(initial: PipelineDraft, overrides: Overrides = {}, onSave = vi.fn(async (_b: PipelineCreate) => {})) {
+function setup(initial: PipelineDraft, overrides: Overrides = {}, onSave = vi.fn<(b: PipelineCreate) => Promise<void>>(async () => {})) {
   const fetchMock = vi.fn(createMockFetch(overrides));
   vi.stubGlobal('fetch', fetchMock);
   render(<PipelineForm initial={initial} sources={[source]} onSave={onSave} />);
