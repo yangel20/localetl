@@ -11,10 +11,10 @@ import pandas as pd
 import pytest
 
 from app.etl import PipelineConfig, RejectionLimitExceeded, validate_pipeline_config
+from app.etl.errors import EtlError
 from app.etl.validate import (
     MAX_REGEX_VALUE_LENGTH,
     Validator,
-    _config_scalar,
     check_rejection_ratio,
 )
 
@@ -106,7 +106,8 @@ def test_unique_composite_key() -> None:
     df = frame(id=[1, 1, 1], name=["a", "b", "a"])
     res = run([{"rule": "unique", "columns": ["id", "name"]}], df)
     assert rules_of(res) == [(3, "unique", None)]
-    assert res.rejections[0].value == "1, a"
+    assert res.rejections[0].value == '[1,"a"]'
+    assert "id" in res.rejections[0].message and "name" in res.rejections[0].message
 
 
 def test_unique_ignores_nulls() -> None:
@@ -352,58 +353,99 @@ def test_dropped_rows_only_raise_denominator() -> None:
         check_rejection_ratio(cfg, 2, 5)
 
 
-# ----------------------------------------------------------- casting hold
+# ------------------------------------------------- config values via casting (B)
 
 
-@pytest.mark.parametrize(
-    ("value", "ctype", "expected"),
-    [
-        (5, "integer", 5),
-        (2**63 - 1, "integer", 2**63 - 1),
-        (-(2**63), "integer", -(2**63)),
-        (1, "float", 1.0),
-        (2.5, "float", 2.5),
-        (True, "boolean", True),
-        (False, "boolean", False),
-        ("x", "string", "x"),
-        ("2024-02-29", "date", date(2024, 2, 29)),
-        ("2024-01-31T10:20:30", "datetime", datetime(2024, 1, 31, 10, 20, 30)),
-    ],
-)
-def test_config_scalar_unambiguous(value: Any, ctype: str, expected: Any) -> None:
-    result = _config_scalar(value, ctype)
-    assert result == expected and type(result) is type(expected)
+def test_config_values_use_the_shared_casting_rules() -> None:
+    # integral float bound on an integer column, string-encoded number, ISO date bounds
+    res = run([{"rule": "range", "column": "id", "min": 2.0, "max": 3}], frame(id=[1, 2, 3, 4]))
+    assert [r.row_number for r in res.rejections] == [1, 4]
+    res = run(
+        [{"rule": "allowed_values", "column": "id", "values": ["1", 3.0]}], frame(id=[1, 2, 3])
+    )
+    assert [r.row_number for r in res.rejections] == [2]
+    res = run(
+        [{"rule": "allowed_values", "column": "flag", "values": [1]}], frame(flag=[True, False])
+    )
+    assert [r.row_number for r in res.rejections] == [2]
+    res = run(
+        [{"rule": "range", "column": "at", "min": "2024-01-01 10:00"}],
+        frame(at=[datetime(2024, 1, 1, 9)]),
+    )
+    assert [r.row_number for r in res.rejections] == [1]
 
 
-def test_held_cases_raise_not_implemented() -> None:
-    held = [
-        (True, "integer"), (1.0, "integer"), ("5", "integer"), (2**63, "integer"),
-        (True, "float"), ("1.5", "float"), (float("inf"), "float"),
-        (1, "boolean"), (0, "boolean"), ("true", "boolean"),
-        (5, "string"), (True, "string"),
-        ("20240131", "date"), ("2024-W05-3", "date"), ("2024-02-30", "date"),
-        (" 2024-01-31", "date"), ("2024-01-31T00:00:00", "date"), (5, "date"),
-        ("2024-01-31", "datetime"), ("2024-01-31 10:00:00", "datetime"),
-        ("2024-01-31T10:00:00Z", "datetime"), ("2024-01-31T10:00:00+02:00", "datetime"),
-        ("2024-01-31T10:00:00.5", "datetime"), ("2024-01-31T10:00", "datetime"),
-        (" 2024-01-31T10:00:00", "datetime"),
-    ]  # fmt: skip
-    for value, ctype in held:
-        with pytest.raises(NotImplementedError, match="Q6-3"):
-            _config_scalar(value, ctype)
-
-
-def test_hold_surfaces_at_validator_construction() -> None:
+def test_invalid_config_values_raise_etl_error_at_construction() -> None:
     raw = {
         "version": 1,
         "columns": COLUMNS,
-        "validations": [{"rule": "allowed_values", "column": "id", "values": [1, 2]}],
         "target": {"table": "t", "mode": "replace"},
     }
-    ok = PipelineConfig(raw=raw)
-    Validator(ok)
-    held = PipelineConfig(
-        raw={**raw, "validations": [{"rule": "allowed_values", "column": "id", "values": ["1"]}]}
+    for rule in (
+        {"rule": "range", "column": "id", "min": 0.5},
+        {"rule": "allowed_values", "column": "id", "values": [True]},
+        {"rule": "range", "column": "day", "min": "20240101"},
+        {"rule": "allowed_values", "column": "name", "values": [5]},
+    ):
+        with pytest.raises(EtlError, match="validate"):
+            Validator(PipelineConfig(raw={**raw, "validations": [rule]}))
+
+
+# ------------------------------------------------------------- Q7 semantics
+
+
+def test_q7_1_composite_key_with_any_null_never_registers_or_duplicates() -> None:
+    v = Validator(make([{"rule": "unique", "columns": ["id", "name"]}]))
+    res = v.validate_chunk(frame(id=[1, 1, None, None], name=[None, None, "a", "a"]), [1, 2, 3, 4])
+    assert res.rejections == []
+    res = v.validate_chunk(frame(id=[1, 1], name=["a", "a"]), [5, 6])
+    assert [r.row_number for r in res.rejections] == [6]
+
+
+def test_q7_2_composite_value_is_compact_json_with_native_types() -> None:
+    df = frame(day=[date(2026, 10, 20)] * 2, flag=[True] * 2, score=[1.5] * 2, name=['a"é'] * 2)
+    res = run([{"rule": "unique", "columns": ["name", "day", "flag", "score"]}], df)
+    (r,) = res.rejections
+    assert (r.column, r.rule, r.value) == (None, "unique", r'["a\"é","2026-10-20",true,1.5]')
+
+
+def test_q7_2_composite_value_truncated_to_500() -> None:
+    df = frame(name=["x" * 900] * 2, id=[1, 1])
+    (r,) = run([{"rule": "unique", "columns": ["name", "id"]}], df).rejections
+    assert len(r.value or "") == 500
+
+
+def test_q7_2_single_column_unique_keeps_column_and_text_value() -> None:
+    (r,) = run([{"rule": "unique", "columns": ["id"]}], frame(id=[7, 7])).rejections
+    assert (r.column, r.value) == ("id", "7")
+
+
+def test_q7_3_fail_run_evaluates_the_whole_chunk_and_names_the_first_row() -> None:
+    v = Validator(
+        make(
+            [{"rule": "not_null", "column": "id"}, {"rule": "range", "column": "id", "min": 5}],
+            on_validation_failure="fail_run",
+        )
     )
-    with pytest.raises(NotImplementedError, match="pending casting specification Q6-3"):
-        Validator(held)
+    with pytest.raises(RejectionLimitExceeded, match=r"row 1 failed range"):
+        v.validate_chunk(frame(id=[1, None, 9]), [1, 2, 3])
+
+
+def test_q7_4_regex_and_length_on_non_strings_raise_etl_error_not_str() -> None:
+    raw = {"version": 1, "columns": COLUMNS, "target": {"table": "t", "mode": "replace"}}
+    for rule in (
+        {"rule": "regex", "column": "id", "pattern": "1"},
+        {"rule": "length", "column": "id", "max": 3},
+    ):
+        with pytest.raises(EtlError, match="applies only to string"):
+            Validator(PipelineConfig(raw={**raw, "validations": [rule]}))
+
+
+def test_q7_4_non_string_value_in_a_string_column_raises() -> None:
+    for rule in (
+        {"rule": "regex", "column": "name", "pattern": "1"},
+        {"rule": "length", "column": "name", "max": 3},
+    ):
+        v = Validator(make([rule]))
+        with pytest.raises(EtlError, match="never converted"):
+            v.validate_chunk(frame(name=[123]), [1])

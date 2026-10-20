@@ -19,14 +19,15 @@ by the first row that reaches the step, even if that row fails another rule.
 Nulls are ignored by every rule except ``not_null`` (they never fail ``unique``,
 ``range``, ``allowed_values``, ``regex`` or ``length``).
 
-Casting hold (Q6-3 is not approved): config values (``range`` bounds,
-``allowed_values.values``) are converted by :func:`_config_scalar`, which only
-handles the unambiguous cases and raises ``NotImplementedError`` otherwise.
+Config values (``range`` bounds, ``allowed_values.values``) are converted with the
+shared config-scalar casting (:func:`app.etl.casting.cast_config_value`, Q6-3 B).
+Nulls and composite ``unique`` keys follow Q7-1/Q7-2; ``regex`` and ``length`` on a
+non-string column raise ``EtlError`` instead of converting values (Q7-4).
 """
 
 from __future__ import annotations
 
-import math
+import json
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -35,16 +36,12 @@ from typing import Any
 
 import pandas as pd
 
+from .casting import CastError, cast_config_value
 from .errors import EtlError, RejectionLimitExceeded
 from .types import PipelineConfig, RejectedRow, RejectionRule
 
 MAX_REGEX_VALUE_LENGTH = 10_000
 MAX_REJECTED_VALUE_LENGTH = 500
-_BIGINT_MIN = -(2**63)
-_BIGINT_MAX = 2**63 - 1
-_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
-_DATETIME_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
-_HOLD = "pending casting specification Q6-3"
 
 
 @dataclass(frozen=True)
@@ -57,42 +54,13 @@ class ChunkResult:
 # ----------------------------------------------------------------- config values
 
 
-def _config_scalar(value: Any, column_type: str) -> Any:
-    """Convert a JSON config scalar to the column's Python type.
-
-    Only the cases that behave identically before and after the casting
-    specification (Q6-3) are implemented. Everything else is held.
-    """
-    if column_type == "integer":
-        if type(value) is int and _BIGINT_MIN <= value <= _BIGINT_MAX:
-            return value
-    elif column_type == "float":
-        if type(value) in (int, float):
-            try:
-                result = float(value)
-            except OverflowError:
-                result = math.inf
-            if math.isfinite(result):
-                return result
-    elif column_type == "boolean":
-        if type(value) is bool:
-            return value
-    elif column_type == "string":
-        if type(value) is str:
-            return value
-    elif column_type == "date":
-        if type(value) is str and _DATE_RE.fullmatch(value):
-            try:
-                return date.fromisoformat(value)
-            except ValueError:
-                pass
-    elif column_type == "datetime":
-        if type(value) is str and _DATETIME_RE.fullmatch(value):
-            try:
-                return datetime.fromisoformat(value)
-            except ValueError:
-                pass
-    raise NotImplementedError(_HOLD)
+def _config_value(value: Any, column_type: str, where: str) -> Any:
+    try:
+        return cast_config_value(value, column_type)
+    except CastError as exc:
+        raise EtlError(
+            f"validate: {where}: {value!r} is not a valid {column_type} value ({exc})"
+        ) from exc
 
 
 # ------------------------------------------------------------------ cell helpers
@@ -122,6 +90,33 @@ def _render(value: Any) -> str:
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return str(value)
+
+
+def _json_native(value: Any) -> Any:
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
+
+
+def _unique_value(key: tuple[Any, ...]) -> str:
+    """Composite key as a compact JSON array of JSON-native values (Q7-2)."""
+    return json.dumps([_json_native(k) for k in key], separators=(",", ":"), ensure_ascii=False)
+
+
+def _require_string(name: str, column_type: str, rule: str) -> None:
+    if column_type != "string":
+        raise EtlError(
+            f"validate: {rule} applies only to string columns; '{name}' is {column_type}"
+        )
+
+
+def _require_str(value: Any, name: str, rule: str) -> str:
+    if not isinstance(value, str):
+        raise EtlError(
+            f"validate: {rule} met a {type(value).__name__} value in column '{name}'; "
+            "values are never converted with str()"
+        )
+    return value
 
 
 def _clip(text: str) -> str:
@@ -218,7 +213,7 @@ class Validator:
                     continue  # nulls are distinct; not_null covers them
                 if key in seen:
                     label = names[0] if len(names) == 1 else None
-                    shown = ", ".join(_render(k) for k in key)
+                    shown = _unique_value(key) if len(key) > 1 else _render(key[0])
                     out.append(
                         (
                             i,
@@ -240,8 +235,10 @@ class Validator:
     def _range(self, rule: dict[str, Any]) -> _Compiled:
         name = rule["column"]
         ctype = self._types[name]
-        low = _config_scalar(rule["min"], ctype) if "min" in rule else None
-        high = _config_scalar(rule["max"], ctype) if "max" in rule else None
+        low = _config_value(rule["min"], ctype, f"range min on '{name}'") if "min" in rule else None
+        high = (
+            _config_value(rule["max"], ctype, f"range max on '{name}'") if "max" in rule else None
+        )
 
         def run(frame: pd.DataFrame, numbers: Sequence[int]) -> list[_Failure]:
             out: list[_Failure] = []
@@ -270,7 +267,7 @@ class Validator:
     def _allowed_values(self, rule: dict[str, Any]) -> _Compiled:
         name = rule["column"]
         ctype = self._types[name]
-        allowed = {_config_scalar(v, ctype) for v in rule["values"]}
+        allowed = {_config_value(v, ctype, f"allowed_values on '{name}'") for v in rule["values"]}
 
         def run(frame: pd.DataFrame, numbers: Sequence[int]) -> list[_Failure]:
             return [
@@ -289,6 +286,7 @@ class Validator:
     def _regex(self, rule: dict[str, Any]) -> _Compiled:
         name = rule["column"]
         ctype = self._types[name]
+        _require_string(name, ctype, "regex")
         pattern = re.compile(rule["pattern"])
 
         def run(frame: pd.DataFrame, numbers: Sequence[int]) -> list[_Failure]:
@@ -296,7 +294,7 @@ class Validator:
             for i, v in enumerate(_typed_values(frame, name, ctype)):
                 if v is None:
                     continue
-                text = str(v)
+                text = _require_str(v, name, "regex")
                 if len(text) > MAX_REGEX_VALUE_LENGTH:
                     message = (
                         f"'{name}' is longer than {MAX_REGEX_VALUE_LENGTH} characters; not matched"
@@ -313,6 +311,7 @@ class Validator:
     def _length(self, rule: dict[str, Any]) -> _Compiled:
         name = rule["column"]
         ctype = self._types[name]
+        _require_string(name, ctype, "length")
         low: int | None = rule.get("min")
         high: int | None = rule.get("max")
 
@@ -321,7 +320,7 @@ class Validator:
             for i, v in enumerate(_typed_values(frame, name, ctype)):
                 if v is None:
                     continue
-                text = str(v)
+                text = _require_str(v, name, "length")
                 if (low is not None and len(text) < low) or (high is not None and len(text) > high):
                     bounds = " and ".join(
                         p
