@@ -12,6 +12,7 @@ and adds its cases here.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import threading
@@ -54,11 +55,11 @@ COVERAGE: dict[str, str] = {
     "getRun": COVERED,
     "listRunEvents": COVERED,
     "listRunRejections": COVERED,
-    "listDatasets": "pending: BE-06",
-    "getDataset": "pending: BE-06",
-    "listDatasetRows": "pending: BE-06",
-    "getDatasetProfile": "pending: BE-06",
-    "getMetricsSummary": "pending: BE-06",
+    "listDatasets": COVERED,
+    "getDataset": COVERED,
+    "listDatasetRows": COVERED,
+    "getDatasetProfile": COVERED,
+    "getMetricsSummary": COVERED,
 }
 
 
@@ -327,6 +328,10 @@ def clean(inprocess: None, scratch_engine: sa.Engine, data_dir: Path) -> Iterato
     def wipe() -> None:
         with scratch_engine.begin() as conn:
             conn.execute(sa.text("TRUNCATE pipelines, data_sources CASCADE"))
+            for (table,) in conn.execute(
+                sa.text("SELECT tablename FROM pg_tables WHERE schemaname = 'datasets'")
+            ).all():
+                conn.execute(sa.text(f'DROP TABLE IF EXISTS datasets."{table}" CASCADE'))
         for sub in ("sources", "tmp"):
             folder = data_dir / sub
             if folder.is_dir():
@@ -1660,3 +1665,526 @@ def test_op_listRunRejections(
     conformance.assert_error_body(
         client.get(f"{contract.prefix}{RUNS}/not-a-uuid/rejections"), 422, "validation_error"
     )
+
+
+# ----------------------------------------------------------------------------------------------
+# BE-06: datasets and metrics (listDatasets, getDataset, listDatasetRows, getDatasetProfile,
+# getMetricsSummary). Datasets are published by the real engine (`run_pipeline`) and registered the
+# way the worker will (a succeeded run plus a `datasets` row); crafted tables cover edge cases.
+# ----------------------------------------------------------------------------------------------
+
+DATASETS = "/datasets"
+HIDDEN = ("_localetl_run_id", "_localetl_row_number")
+
+
+def register_dataset(
+    engine: sa.Engine,
+    table: str,
+    columns: list[tuple[str, str]],
+    row_count: int,
+    pipeline_id: str | None = None,
+    published_at: str = "2026-10-20T12:00:00Z",
+) -> str:
+    """Insert the registry row (and the succeeded run it points to) for an existing table."""
+    run_id, dataset_id = str(uuid.uuid4()), str(uuid.uuid4())
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO runs (id, pipeline_id, pipeline_name, config_snapshot, config_version,"
+                " status, finished_at, extracted_count, loaded_count)"
+                " VALUES (:id, :pid, 'p', '{}', 1, 'succeeded', now(), :n, :n)"
+            ),
+            {"id": run_id, "pid": pipeline_id, "n": row_count},
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO datasets (id, table_name, pipeline_id, last_run_id, row_count,"
+                " columns,"
+                " published_at) VALUES (:id, :t, :pid, :run, :n, CAST(:cols AS jsonb), :at)"
+            ),
+            {
+                "id": dataset_id,
+                "t": table,
+                "pid": pipeline_id,
+                "run": run_id,
+                "n": row_count,
+                "cols": json.dumps([{"name": n, "type": t} for n, t in columns]),
+                "at": published_at,
+            },
+        )
+    return dataset_id
+
+
+def publish_orders(
+    engine: sa.Engine, table: str = "orders_clean", published_at: str = "2026-10-20T12:00:00Z"
+) -> str:
+    """Run the real engine on the clean orders file and register what it published."""
+    from app.etl import CsvOptions, run_pipeline, validate_pipeline_config
+
+    config = orders_config()
+    config["target"] = {"table": table, "mode": "replace"}  # type: ignore[index]
+    result = run_pipeline(
+        validate_pipeline_config(config),
+        FIXTURE_CSV / "orders_clean.csv",
+        CsvOptions(),
+        engine,
+        uuid.uuid4(),
+    )
+    assert result.loaded_count == 200
+    return register_dataset(
+        engine,
+        table,
+        list(result.published.columns),
+        result.published.row_count,
+        None,
+        published_at,
+    )
+
+
+def craft_table(
+    engine: sa.Engine, table: str, ddl_columns: str, rows: list[dict[str, object]]
+) -> None:
+    """A published-shaped table: the given columns plus the two run-metadata columns."""
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                f'CREATE TABLE datasets."{table}" ({ddl_columns}, _localetl_run_id uuid NOT NULL,'
+                " _localetl_row_number bigint NOT NULL)"
+            )
+        )
+        for i, row in enumerate(rows, start=1):
+            names = ", ".join(f'"{k}"' for k in row)
+            marks = ", ".join(f":{k}" for k in row)
+            conn.execute(
+                sa.text(
+                    f'INSERT INTO datasets."{table}" ({names}, _localetl_run_id,'
+                    f" _localetl_row_number) VALUES ({marks}, :rid, :rn)"
+                ),
+                {**row, "rid": str(uuid.uuid4()), "rn": i},
+            )
+
+
+def test_op_listDatasets(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    empty = client.get(f"{contract.prefix}{DATASETS}")
+    assert conformance.assert_conforms(empty).operation_id == "listDatasets"
+    assert empty.json() == {"total": 0, "limit": 50, "offset": 0, "items": []}
+    a = publish_orders(clean, "orders_a", "2026-10-20T10:00:00Z")
+    b = publish_orders(clean, "orders_b", "2026-10-20T11:00:00Z")
+    page = client.get(f"{contract.prefix}{DATASETS}")
+    conformance.assert_conforms(page)
+    assert page.json()["total"] == 2 and [d["id"] for d in page.json()["items"]] == [
+        b,
+        a,
+    ]  # newest first
+    first = page.json()["items"][0]
+    assert first["table_name"] == "orders_b" and first["row_count"] == 200
+    assert [c["name"] for c in first["columns"]] == [
+        "order_id",
+        "customer_email",
+        "country",
+        "status",
+        "amount",
+        "order_date",
+        "is_gift",
+    ]
+    assert not any(c["name"] in HIDDEN for c in first["columns"])
+    p2 = client.get(f"{contract.prefix}{DATASETS}", params={"limit": 1, "offset": 1})
+    conformance.assert_conforms(p2)
+    assert [d["id"] for d in p2.json()["items"]] == [a] and p2.json()["total"] == 2
+    for bad in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        e = client.get(f"{contract.prefix}{DATASETS}", params=bad)
+        conformance.assert_conforms(e)
+        assert e.status_code == 422, bad
+
+
+def test_op_getDataset(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    did = publish_orders(clean)
+    r = client.get(f"{contract.prefix}{DATASETS}/{did}")
+    assert conformance.assert_conforms(r).operation_id == "getDataset"
+    body_ = r.json()
+    assert (
+        body_["id"] == did and body_["table_name"] == "orders_clean" and body_["row_count"] == 200
+    )
+    assert {c["name"]: c["type"] for c in body_["columns"]}["amount"] == "float"
+    assert body_["pipeline_id"] is None
+    missing = client.get(f"{contract.prefix}{DATASETS}/{uuid.uuid4()}")
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    conformance.assert_error_body(
+        client.get(f"{contract.prefix}{DATASETS}/not-a-uuid"), 422, "validation_error"
+    )
+
+
+def test_op_listDatasetRows(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    did = publish_orders(clean)
+    url = f"{contract.prefix}{DATASETS}/{did}/rows"
+    r = client.get(url)
+    assert conformance.assert_conforms(r).operation_id == "listDatasetRows"
+    page = r.json()
+    assert (
+        page["total"] == 200
+        and page["limit"] == 50
+        and page["offset"] == 0
+        and len(page["items"]) == 50
+    )
+    names = [c["name"] for c in page["columns"]]
+    assert all(list(item) == names for item in page["items"])  # registry columns only, in order
+    assert not any(k in item for item in page["items"] for k in HIDDEN)
+    ids = [item["order_id"] for item in page["items"]]
+    assert ids == sorted(ids) and ids[0] == 1  # default: file (row) order
+    first = page["items"][0]
+    assert isinstance(first["order_id"], int) and isinstance(first["amount"], float)
+    assert isinstance(first["order_date"], str) and len(first["order_date"]) == 10  # ISO date
+    p2 = client.get(url, params={"limit": 5, "offset": 10})
+    conformance.assert_conforms(p2)
+    assert [i["order_id"] for i in p2.json()["items"]] == ids_range(11, 15)
+    assert p2.json()["offset"] == 10 and len(p2.json()["items"]) == 5
+    desc = client.get(url, params={"sort": "order_id", "order": "desc", "limit": 3})
+    conformance.assert_conforms(desc)
+    assert [i["order_id"] for i in desc.json()["items"]] == [200, 199, 198]
+    asc = client.get(url, params={"sort": "amount", "limit": 200})
+    conformance.assert_conforms(asc)
+    amounts = [i["amount"] for i in asc.json()["items"]]
+    assert amounts == sorted(amounts)
+    beyond = client.get(url, params={"offset": 500})
+    conformance.assert_conforms(beyond)
+    assert beyond.json()["items"] == [] and beyond.json()["total"] == 200
+
+
+def ids_range(a: int, b: int) -> list[int]:
+    return list(range(a, b + 1))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"sort": "nope"},
+        {"sort": "_localetl_row_number"},
+        {"sort": "_localetl_run_id"},
+        {"sort": "order_id; DROP TABLE runs;--"},
+        {"sort": 'order_id" DESC, (SELECT 1)--'},
+        {"order": "sideways"},
+        {"limit": 0},
+        {"limit": 201},
+        {"offset": -1},
+    ],
+)
+def test_listDatasetRows_422_and_nothing_executed(
+    client: httpx.Client,
+    conformance: Conformance,
+    contract: Contract,
+    clean: sa.Engine,
+    bad: dict[str, object],
+) -> None:
+    did = publish_orders(clean)
+    r = client.get(f"{contract.prefix}{DATASETS}/{did}/rows", params=bad)
+    conformance.assert_conforms(r)
+    assert r.status_code == 422, bad
+    if "sort" in bad:
+        assert [d["path"] for d in r.json()["error"]["details"]] == ["/sort"]
+    assert count(clean, "runs") == 1  # the injection attempt did not touch other tables
+
+
+def test_listDatasetRows_nulls_types_and_hostile_names(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    """Reserved words as table and column names work because identifiers are quoted."""
+    craft_table(
+        clean,
+        "order",
+        '"group" bigint, "select" text, "user" boolean, "when" date, "ts" timestamp,'
+        ' "x" double precision',
+        [
+            {
+                "group": 2,
+                "select": "b",
+                "user": True,
+                "when": dt.date(2026, 1, 2),
+                "ts": dt.datetime(2026, 1, 2, 3, 4, 5),
+                "x": 1.5,
+            },
+            {"group": 1, "select": None, "user": False, "when": None, "ts": None, "x": None},
+        ],
+    )
+    did = register_dataset(
+        clean,
+        "order",
+        [
+            ("group", "integer"),
+            ("select", "string"),
+            ("user", "boolean"),
+            ("when", "date"),
+            ("ts", "datetime"),
+            ("x", "float"),
+        ],
+        2,
+    )
+    r = client.get(f"{contract.prefix}{DATASETS}/{did}/rows")
+    conformance.assert_conforms(r)
+    items = r.json()["items"]
+    assert items[0] == {
+        "group": 2,
+        "select": "b",
+        "user": True,
+        "when": "2026-01-02",
+        "ts": "2026-01-02T03:04:05",
+        "x": 1.5,
+    }
+    assert items[1] == {
+        "group": 1,
+        "select": None,
+        "user": False,
+        "when": None,
+        "ts": None,
+        "x": None,
+    }
+    by_group = client.get(f"{contract.prefix}{DATASETS}/{did}/rows", params={"sort": "group"})
+    conformance.assert_conforms(by_group)
+    assert [i["group"] for i in by_group.json()["items"]] == [1, 2]
+    by_select = client.get(
+        f"{contract.prefix}{DATASETS}/{did}/rows", params={"sort": "select", "order": "desc"}
+    )
+    conformance.assert_conforms(by_select)
+    assert len(by_select.json()["items"]) == 2
+
+
+def test_dataset_registry_problems_are_contract_errors(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    missing_table = register_dataset(clean, "never_created", [("a", "integer")], 0)
+    for suffix in ("rows", "profile"):
+        r = client.get(f"{contract.prefix}{DATASETS}/{missing_table}/{suffix}")
+        conformance.assert_error_body(r, 500, "internal_error")
+    bad_name = register_dataset(clean, "Bad Name; DROP TABLE runs", [("a", "integer")], 0)
+    r = client.get(f"{contract.prefix}{DATASETS}/{bad_name}/rows")
+    conformance.assert_error_body(r, 500, "internal_error")
+    assert count(clean, "runs") == 2  # nothing was executed
+    # the metadata endpoints still work for those rows
+    conformance.assert_conforms(client.get(f"{contract.prefix}{DATASETS}/{bad_name}"))
+
+
+def test_op_getDatasetProfile(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    rows = [
+        {
+            "id": i,
+            "name": f"n{i % 12:02d}" if i % 5 else None,
+            "score": float(i) / 2,
+            "flag": i % 2 == 0,
+            "d": dt.date(2026, 1, 1) + dt.timedelta(days=i),
+            "ts": dt.datetime(2026, 1, 1, 0, 0, 0) + dt.timedelta(hours=i),
+            "empty": None,
+        }
+        for i in range(1, 31)
+    ]
+    craft_table(
+        clean,
+        "prof",
+        "id bigint, name text, score double precision, flag boolean, d date, ts timestamp,"
+        " empty text",
+        rows,
+    )
+    did = register_dataset(
+        clean,
+        "prof",
+        [
+            ("id", "integer"),
+            ("name", "string"),
+            ("score", "float"),
+            ("flag", "boolean"),
+            ("d", "date"),
+            ("ts", "datetime"),
+            ("empty", "string"),
+        ],
+        30,
+    )
+    r = client.get(f"{contract.prefix}{DATASETS}/{did}/profile")
+    assert conformance.assert_conforms(r).operation_id == "getDatasetProfile"
+    prof = r.json()
+    assert prof["dataset_id"] == did and prof["row_count"] == 30
+    cols = {c["name"]: c for c in prof["columns"]}
+    assert list(cols) == [
+        "id",
+        "name",
+        "score",
+        "flag",
+        "d",
+        "ts",
+        "empty",
+    ]  # registry order, no _localetl_*
+    assert (
+        cols["id"]["null_count"],
+        cols["id"]["distinct_count"],
+        cols["id"]["min"],
+        cols["id"]["max"],
+    ) == (0, 30, 1, 30)
+    assert cols["score"]["min"] == 0.5 and cols["score"]["max"] == 15.0
+    assert (
+        cols["name"]["null_count"] == 6
+        and cols["name"]["min"] is None
+        and cols["name"]["max"] is None
+    )
+    assert cols["name"]["distinct_count"] == 12
+    assert cols["flag"]["min"] is None and cols["flag"]["distinct_count"] == 2
+    assert cols["d"]["min"] == "2026-01-02" and cols["d"]["max"] == "2026-01-31"
+    assert cols["ts"]["min"] == "2026-01-01T01:00:00" and cols["ts"]["max"] == "2026-01-02T06:00:00"
+    assert (
+        cols["empty"]["null_count"],
+        cols["empty"]["distinct_count"],
+        cols["empty"]["top_values"],
+    ) == (30, 0, [])
+    top = cols["id"]["top_values"]
+    assert len(top) == 10  # at most 10
+    name_top = cols["name"]["top_values"]
+    assert len(name_top) == 10 and [t["count"] for t in name_top] == sorted(
+        (t["count"] for t in name_top), reverse=True
+    )
+    assert sum(t["count"] for t in cols["flag"]["top_values"]) == 30
+    missing = client.get(f"{contract.prefix}{DATASETS}/{uuid.uuid4()}/profile")
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    conformance.assert_error_body(
+        client.get(f"{contract.prefix}{DATASETS}/not-a-uuid/profile"), 422, "validation_error"
+    )
+
+
+def utc_day(offset: int) -> dt.date:
+    return dt.datetime.now(dt.UTC).date() - dt.timedelta(days=offset)
+
+
+def add_metric_run(
+    engine: sa.Engine,
+    status: str,
+    finished: dt.datetime | None,
+    duration_s: float | None,
+    loaded: int = 0,
+    extracted: int | None = None,
+) -> None:
+    started = (
+        finished - dt.timedelta(seconds=duration_s) if finished and duration_s is not None else None
+    )
+    if extracted is None:
+        extracted = loaded if status == "succeeded" else 0
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO runs (pipeline_name, config_snapshot, config_version, status,"
+                " started_at,"
+                " finished_at, extracted_count, loaded_count) VALUES ('p', '{}', 1,"
+                " CAST(:s AS run_status), :st, :fi, :ex, :lo)"
+            ),
+            {"s": status, "st": started, "fi": finished, "ex": extracted, "lo": loaded},
+        )
+
+
+def at(day: dt.date, hour: int, minute: int = 0) -> dt.datetime:
+    return dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=dt.UTC)
+
+
+def test_op_getMetricsSummary(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    url = f"{contract.prefix}/metrics/summary"
+    empty = client.get(url)
+    assert conformance.assert_conforms(empty).operation_id == "getMetricsSummary"
+    e = empty.json()
+    assert e["total_runs"] == 0 and e["loaded_count_total"] == 0 and e["avg_duration_ms"] is None
+    assert e["runs_by_status"] == {
+        "queued": 0,
+        "running": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "interrupted": 0,
+    }
+    assert len(e["daily"]) == 30
+    expected_days = [str(utc_day(29 - i)) for i in range(30)]
+    assert [
+        d["date"] for d in e["daily"]
+    ] == expected_days  # ascending, ending today (UTC), zero-filled
+    assert all(
+        d == {"date": d["date"], "succeeded": 0, "failed": 0, "interrupted": 0, "loaded_count": 0}
+        for d in e["daily"]
+    )
+    today, yday = utc_day(0), utc_day(1)
+    add_metric_run(clean, "succeeded", at(today, 1, 0), 2.0, loaded=5)
+    add_metric_run(clean, "succeeded", at(yday, 23, 30), 4.0, loaded=7)
+    add_metric_run(clean, "failed", at(yday, 10), 1.0, extracted=3)
+    add_metric_run(clean, "interrupted", at(utc_day(3), 12), None)
+    with clean.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO runs (pipeline_name, config_snapshot, config_version, status)"
+                " VALUES ('q', '{}', 1, 'queued')"
+            )
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO runs (pipeline_name, config_snapshot, config_version, status,"
+                " started_at) VALUES ('r', '{}', 1, 'running', now())"
+            )
+        )
+    r = client.get(url)
+    conformance.assert_conforms(r)
+    m = r.json()
+    assert m["total_runs"] == 6
+    assert m["runs_by_status"] == {
+        "queued": 1,
+        "running": 1,
+        "succeeded": 2,
+        "failed": 1,
+        "interrupted": 1,
+    }
+    assert m["loaded_count_total"] == 12  # succeeded runs only
+    assert m["avg_duration_ms"] == pytest.approx((2000 + 4000 + 1000) / 3)
+    daily = {d["date"]: d for d in m["daily"]}
+    assert daily[str(today)] == {
+        "date": str(today),
+        "succeeded": 1,
+        "failed": 0,
+        "interrupted": 0,
+        "loaded_count": 5,
+    }
+    assert daily[str(yday)] == {
+        "date": str(yday),
+        "succeeded": 1,
+        "failed": 1,
+        "interrupted": 0,
+        "loaded_count": 7,
+    }  # 23:30 UTC stays on its UTC day
+    assert (
+        daily[str(utc_day(3))]["interrupted"] == 1 and daily[str(utc_day(3))]["loaded_count"] == 0
+    )
+    assert (
+        sum(d["succeeded"] + d["failed"] + d["interrupted"] for d in m["daily"]) == 4
+    )  # queued/running are not bucketed
+    assert sum(d["loaded_count"] for d in m["daily"]) == 12
+
+
+def test_getMetricsSummary_days_window(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    url = f"{contract.prefix}/metrics/summary"
+    add_metric_run(clean, "succeeded", at(utc_day(0), 1), 1.0, loaded=1)
+    add_metric_run(clean, "succeeded", at(utc_day(20), 1), 1.0, loaded=10)
+    seven = client.get(url, params={"days": 7})
+    conformance.assert_conforms(seven)
+    assert len(seven.json()["daily"]) == 7 and seven.json()["daily"][-1]["date"] == str(utc_day(0))
+    assert seven.json()["loaded_count_total"] == 11  # totals are not limited to the window
+    assert sum(d["loaded_count"] for d in seven.json()["daily"]) == 1
+    one = client.get(url, params={"days": 1})
+    conformance.assert_conforms(one)
+    assert [d["date"] for d in one.json()["daily"]] == [str(utc_day(0))]
+    year = client.get(url, params={"days": 365})
+    conformance.assert_conforms(year)
+    assert len(year.json()["daily"]) == 365
+    for bad in ({"days": 0}, {"days": 366}, {"days": "x"}):
+        e = client.get(url, params=bad)
+        conformance.assert_conforms(e)
+        assert e.status_code == 422, bad
