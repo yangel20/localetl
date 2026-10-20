@@ -247,6 +247,14 @@ def scratch_url() -> Iterator[str]:
 
 
 @pytest.fixture(scope="module")
+def scratch_engine(scratch_url: str) -> Iterator[sa.Engine]:
+    """Engine on the module's throwaway database, for arranging and checking state directly."""
+    engine = sa.create_engine(scratch_url)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture(scope="module")
 def data_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("localetl-data")
 
