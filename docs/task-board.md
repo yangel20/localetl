@@ -121,9 +121,25 @@ graph LR
   ETL07 & BE06 & QA03 & QA05 --> QA07
 ```
 
-## Wave 2 (not assigned yet)
+## Wave 2 (approved 2026-10-20; not started)
 
-WK-01 claim/heartbeat/recovery loop · WK-02 run execution and success/failure transactions · WK-03 signal handling · VIZ-01 run metrics charts · VIZ-02 dataset explorer with profile charts · QA-08 Playwright E2E demo (MVP gate). Depends on Wave 1 exit (QA-07 PASS).
+Approved by the user 2026-10-20. Starts after the user launches `agent-worker` and `agent-viz` (see `docs/checkpoints/CHECKPOINT.md`). Hardening track deferred until Wave 2 core and QA are complete.
+
+| ID | Title | Owner | Depends on | Files | Acceptance criteria | Status |
+|---|---|---|---|---|---|---|
+| WK-01 | Claim, heartbeat, recovery loop | worker-engineer | Wave 1 | `backend/app/worker/**`, `backend/app/services/runs/**`, `backend/tests/worker/**` | `python -m app.worker`; claim per §7.2 (`FOR UPDATE SKIP LOCKED`), back off on `one_running_run` violation; recovery of stale `running` at start and every poll; heartbeat/poll/stale from `WORKER_*` env; tests on throwaway DBs incl. two racing workers | Ready (agent not launched) |
+| WK-02 | Execute runs; success/failure transactions | worker-engineer | WK-01, ETL-07 | as WK-01 | `run_pipeline` with `config_snapshot`, source `csv_options`, path = `LOCALETL_DATA_DIR`/`stored_path` (relative), `chunk_rows` = `LOCALETL_CHUNK_ROWS`; per event: insert `run_events` + counters + `current_stage` + heartbeat in one transaction; success and failure transactions per §7.2 (registry upsert, `dataset_id`, rejections; failure uses `getattr(exc, "rejected_sample", [])`); unexpected exceptions → `failed` | Blocked (WK-01) |
+| WK-03 | Signal handling | worker-engineer | WK-02 | as WK-01 | SIGINT/SIGTERM: stop claiming, `should_stop` → `RunInterrupted` at the next boundary, status `interrupted`, clean exit (REQ-44) | Blocked (WK-02) |
+| VIZ-01 | Run metrics charts | visualization-engineer | Wave 1 | `frontend/src/features/analytics/**` | Recharts: run outcomes per day by status, rows loaded per run, from `/metrics/summary` and `/runs` via the FE-02 client; loading/empty/error states; tests (REQ-52, REQ-55) | Ready (agent not launched) |
+| VIZ-02 | Dataset explorer with profile charts | visualization-engineer | Wave 1 | `frontend/src/features/explorer/**` | Datasets list; rows table with paging and single-column sort (text rendering); per-column profile charts (top values, nulls) from `/profile`; tests (REQ-53..55) | Ready (agent not launched) |
+| FE-06 | Mount VIZ screens | frontend-engineer | VIZ-01, VIZ-02 | `frontend/src/pages/datasets/**`, `src/pages/home/**`, `src/pages/runs/**`, `src/app/routes.tsx` | Explorer on Datasets page; charts on Home/Runs; routes + navigation; tests | Blocked |
+| QA-07b | QA-07 uses the real worker persistence | qa-engineer | WK-02 | `tests/integration/test_wave1_flow.py` | Replace the `worker_finish` stand-in with WK-02 code; suite green | Blocked |
+| QA-09 | Performance (REQ-61) | qa-engineer | WK-02 | `tests/perf/**` | 1M rows × 10 columns `replace` run < 5 min; memory bounded to ~one chunk; generated data never committed | Blocked |
+| QA-08 | Playwright E2E demo (MVP gate) | qa-engineer | WK-02, WK-03, FE-06 | `tests/e2e/**` (own `package.json` with `@playwright/test`), `scripts/` launcher | Full stack (Postgres, API, worker, frontend): upload → configure → run → monitor → results and charts; recorded video/trace kept in an ignored directory; CI job. **Playwright and the launcher script approved 2026-10-20; implementation deferred to this ticket** | Blocked |
+
+Critical path: WK-01 → WK-02 → WK-03 → QA-08. VIZ-01/02 → FE-06 in parallel; QA-09 and QA-07b after WK-02.
+
+Deferred (user, 2026-10-20) until Wave 2 core and QA are complete: hardening track for Q8-2..12, Q9, Q10, Q12-2/3.
 
 ## Review log
 

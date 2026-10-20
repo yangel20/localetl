@@ -1,3 +1,5 @@
+> **Superseded 2026-10-20:** Wave 1 is complete. Current state, approvals and resume commands are in `docs/checkpoints/CHECKPOINT.md`. The content below is the 2026-10-19 history.
+
 # LocalETL Session Handoff
 
 Session end: 2026-10-19 · Written by: orchestrator · Wave: **1 (in progress)**. Wave 2 has not started.
