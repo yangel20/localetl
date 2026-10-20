@@ -64,5 +64,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.isort]
+# Classify `app` as first-party wherever ruff is invoked from (backend/ or the
+# repo root, e.g. for tests/integration), so import order is deterministic.
+known-first-party = ["app"]
+
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.File", "fastapi.Form"]
