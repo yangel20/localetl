@@ -13,7 +13,6 @@ ETL-01, 02, 03, 03b, 04, 05, 06, 07 (engine complete) · BE-01, 01b, 02, 03, 04,
 ## Active
 | Ticket | Owner | State |
 |---|---|---|
-| QA-05f | qa | conftest engine-cache fix (small follow-up) |
 | Wave 1 exit | user | all tickets Done, test-all green, QA-07 PASS; remaining exit criterion: no open contract proposals (Q12-1) + open decisions Q8-2..12, Q9, Q10, Q12 |
 | Wave 2 (WK-01..03, VIZ-01..02, QA-08) | — | not started; after QA-07 PASS |
 
