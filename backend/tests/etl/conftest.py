@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -43,3 +44,9 @@ def etl_engine(etl_db: sa.Engine) -> sa.Engine:
             conn.execute(sa.text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
             conn.execute(sa.text(f"CREATE SCHEMA {schema}"))
     return etl_db
+
+
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    """Repository root (contracts/, tests/fixtures/)."""
+    return Path(__file__).resolve().parents[3]

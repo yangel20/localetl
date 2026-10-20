@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from .types import ConfigErrorItem
+from .types import ConfigErrorItem, RejectedRow
 
 
 class EtlError(Exception):
-    """Base class for all engine errors."""
+    """Base class for all engine errors.
+
+    ``rejected_sample`` is set by ``run_pipeline`` before it re-raises: the first
+    1,000 rejection entries of the *completed* chunks, in row order (decision
+    Q11-c), so the worker can persist them for failed and interrupted runs.
+    """
+
+    rejected_sample: list[RejectedRow]
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.rejected_sample = []
 
 
 class CsvFormatError(EtlError):
