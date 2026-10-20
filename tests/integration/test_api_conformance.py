@@ -958,7 +958,7 @@ def test_createPipeline_422_request_shape(
     bad: dict[str, object],
 ) -> None:
     sid = make_source(client, contract)
-    r = client.post(f"{contract.prefix}{PIPELINES}", json=body(sid, **bad))
+    r = client.post(f"{contract.prefix}{PIPELINES}", json={**body(sid), **bad})
     conformance.assert_conforms(r)
     assert r.status_code == 422 and r.json()["error"]["details"]
 
