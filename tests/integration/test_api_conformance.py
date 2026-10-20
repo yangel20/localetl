@@ -277,8 +277,9 @@ def test_health_reports_database_unavailable_not_an_error(
 ) -> None:
     """Unreachable database: 200 with database=unavailable (declared), still conforming."""
     import sqlalchemy as sa
-    from app.core.db import get_engine
     from fastapi.testclient import TestClient
+
+    from app.core.db import get_engine
 
     if "LOCALETL_API_URL" in __import__("os").environ:
         pytest.skip("needs the in-process app to inject a failure")
