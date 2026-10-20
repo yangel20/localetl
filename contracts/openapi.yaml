@@ -735,7 +735,7 @@ components:
           description: A validation rule name from pipeline.schema.json, or `type_cast` / `parse_error`.
           enum: [not_null, unique, range, allowed_values, regex, length, type_cast, parse_error]
         message: { type: string }
-        value: { type: [string, 'null'], description: 'Offending raw value, truncated to 500 characters.' }
+        value: { type: [string, 'null'], description: 'Offending raw value, truncated to 500 characters. For a composite `unique` failure (`column` null), the key as a compact JSON array in rule column order, e.g. ["a@x.com","2026-10-20"] (decision Q7-2). For `parse_error`, the record''s fields joined with the delimiter (decision Q4).' }
     RejectedRowPage:
       allOf:
         - $ref: '#/components/schemas/PageMeta'

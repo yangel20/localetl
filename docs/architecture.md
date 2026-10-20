@@ -305,10 +305,78 @@ Decisions (user, 2026-10-20):
 
 ### Stage semantics
 1. **extract**: tokenize the file per "CSV structure and malformed input" (stdlib `csv` reader, strict quoting) into chunks of `chunk_rows` records, kept as strings. Empty strings become null. Malformed records → `parse_error` rejection; unrecoverable structure → `CsvFormatError`.
-2. **transform**: (a) select `columns[].source` and rename to `columns[].name`; (b) cast to `columns[].type` (whitespace stripped before casting non-string types; `format` used for date/datetime; booleans accept `true/false/1/0/yes/no`, case-insensitive); cast failures → `type_cast` rejection; `nullable: false` nulls → `not_null` rejection; (c) apply `transformations` in array order.
-3. **validate**: apply each `validations` rule; each failing row yields one `RejectedRow` entry per failing rule and counts once in `rejected_count`. `unique` and `deduplicate` track seen keys across chunks. With `on_validation_failure: fail_run`, the first rejection of any kind in the run (parse, cast, `not_null` or a validation rule; Q4-b) raises `RejectionLimitExceeded`. After all chunks, if `rejected_count / extracted_count > max_rejected_ratio`, raise `RejectionLimitExceeded`.
+2. **transform**: (a) select `columns[].source` and rename to `columns[].name`; (b) cast to `columns[].type` per "Value casting" below; cast failures → `type_cast` rejection; `nullable: false` nulls → `not_null` rejection; (c) apply `transformations` in array order.
+3. **validate**: apply each `validations` rule; each failing row yields one `RejectedRow` entry per failing rule and counts once in `rejected_count`. `unique` and `deduplicate` track seen keys across chunks. With `on_validation_failure: fail_run`, the first rejection of any kind in the run (parse, cast, `not_null` or a validation rule; Q4-b) raises `RejectionLimitExceeded`. After all chunks, if `rejected_count / extracted_count > max_rejected_ratio`, raise `RejectionLimitExceeded`. Null handling, composite `unique` values, `fail_run` timing and checkpoints follow "Validation semantics (Q7)".
 4. **load**: rows are appended to `staging.run_<run_id hex>`, created with column types from section 7.3.
 5. **publish** (one transaction): `replace` → drop `datasets.<table>` if present, then `ALTER TABLE staging.run_<hex> SET SCHEMA datasets` and rename it to `<table>`. `append` → create `datasets.<table>` like staging if absent; otherwise require an identical column name/type list (else `LoadError`), then `INSERT INTO datasets.<table> SELECT * FROM staging...` and drop staging.
+
+### Value casting (decision Q6-3, approved 2026-10-20)
+
+> Approved by the user 2026-10-20 with C-a to C-e as recommended, including the strict integer, float, date and datetime rules. CSV casting (transform stage 2b), type inference (`inspect_csv`) and config castability (§6 rule 5, ETL-03) use **one set of shared casting functions** (`backend/app/etl/casting.py`, ETL-03b), so they cannot drift.
+
+**Scope.** (A) CSV cells cast in transform stage 2(b). (B) Config scalars: `fill_null.value`, `allowed_values.values`, `range.min`/`range.max`. §6 rule 5 ("castable") means "(B) succeeds". `inspect_csv` type inference uses (A).
+
+General rules:
+1. **Input.** A CSV cell is a `str` or null; extract has already turned empty strings into null. For non-string types the value is stripped with Python `str.strip()` first. If the stripped value is empty, it is **null** (sub-decision C-a). `string` values are never stripped; `trim_whitespace` does that.
+2. **Nulls are never cast.** A null in a `nullable: false` column is a `not_null` rejection, never `type_cast`.
+3. **ASCII only.** Digits are `0-9` only. Rejected: non-ASCII digits (`١٢`), underscores (`1_000`), thousands separators (`1,000`), decimal commas (`1,5`). Python's `\d`, `int()` and `float()` accept some of these, so a cast must not rely on them alone.
+4. **Failures.** Each cell that fails is one `RejectedRow(rule="type_cast", column=<target name>, value=<raw cell, truncated to 500>, message='cannot cast "<v>" to <type>' plus ' with format <f>' when set)`. All columns of a row are cast, so a row with several bad cells gets several entries but counts once (Q3 rule 2) (sub-decision C-d).
+5. **Determinism.** Casting is a pure function of the value, the type and the format. It gives the same result in every chunk and in `inspect_csv`.
+
+| Type | CSV text accepted (after rule 1) | Result | Rejected examples |
+|---|---|---|---|
+| `integer` | fullmatch `[+-]?[0-9]+`, value within PostgreSQL `bigint` (−2^63 … 2^63−1); leading zeros allowed | `int` | `1.0`, `1e3`, `9223372036854775808`, `١٢`, `1_000` |
+| `float` | fullmatch `[+-]?([0-9]+(\.[0-9]*)?\|\.[0-9]+)([eE][+-]?[0-9]+)?`, result finite | `float` (`double precision`) | `nan`, `inf`, `1e400`, `1,5`, `1_0.5` |
+| `boolean` | case-insensitive `true`/`false`, `yes`/`no`, `1`/`0` | `bool` | `t`, `y`, `on`, `2` |
+| `date`, with `format` | `datetime.strptime(v, format)` matches the whole value; the format contains no time directive (`%H` `%I` `%M` `%S` `%f` `%p` `%X` `%c`) and no zone directive (`%z` `%Z`) (C-e) | `date` | value not matching the format |
+| `date`, no `format` | ISO calendar date only: fullmatch `[0-9]{4}-[0-9]{2}-[0-9]{2}` and a valid date | `date` | `20261020`, `2026-W43-2`, `2026-10-20T00:00`, `2026-02-30` |
+| `datetime`, with `format` | `datetime.strptime(v, format)`; the format contains no zone directive (`%z` `%Z`) (C-e) | naive `datetime` | value not matching the format |
+| `datetime`, no `format` | `YYYY-MM-DD` + `T` or one space + `HH:MM[:SS[.f{1,6}]]`, no offset and no `Z` | naive `datetime` (`timestamp`, §7.3) | `2026-10-20T10:00Z`, `2026-10-20T10:00+02:00`, `20261020T1000`, `2026-10-20` |
+| `string` | anything (unchanged) | `str` | none |
+
+Notes: `%y` uses Python's pivot (`69`–`99` → 19xx, `00`–`68` → 20xx). Values with an offset are rejected rather than converted, because §7.3 stores naive timestamps and a silent conversion would lose information.
+
+**Config scalars (B)**, i.e. JSON `ScalarValue` (string, number, boolean):
+
+| Type | Accepted |
+|---|---|
+| `integer` | JSON integer within `bigint`; a JSON number with zero fraction (`1.0`, which JSON does not distinguish from `1`); a string per the CSV rule. Never a boolean |
+| `float` | finite JSON number (not boolean); a string per the CSV rule |
+| `boolean` | JSON `true`/`false`; numbers `0`/`1`; a string per the CSV rule |
+| `date`, `datetime` | a JSON string in the **ISO** form of the "no `format`" rows above. The column's `format` applies only to CSV cells, never to config values (C-b); this is consistent with §6 rule 4 for range bounds |
+| `string` | a JSON string only (C-c); `5` is not a value for a string column |
+
+Comparisons (`allowed_values`, `range`, `unique`, `deduplicate`) use the cast values. String comparison is exact and case-sensitive, after any earlier transformations.
+
+**Type inference (`inspect_csv`).** Over the sampled well-formed records, a column's `inferred_type` is the first of `integer`, `float`, `boolean`, `date`, `datetime`, `string` that every non-null sampled value casts to under (A), with no `format`. An all-null column is `string`. Consequences: `0`/`1` columns infer `integer`; `yes`/`no` columns infer `boolean`.
+
+**Ticket impact (applied to the board 2026-10-20):**
+- **ETL-04:** stage 2(b) implements exactly this table, with a test per row (accepted and rejected examples) and per rule 1 to 4, using the shared functions in `backend/app/etl/casting.py` (created by ETL-03b).
+- **ETL-03b (new, etl-engineer)**, where the merged ETL-03 differs from this spec:
+  1. `_INT_RE` uses `\d` and accepts non-ASCII digits; the float path uses `float()` and accepts underscores and non-ASCII digits.
+  2. No `bigint` range check.
+  3. Without `format`, dates and datetimes use the lax `fromisoformat`, which accepts compact and week dates and offsets. Timezone-aware range bounds are accepted when not mixed; under this spec they are rejected.
+  4. `fill_null`/`allowed_values` date values are parsed with the column `format`; under this spec they must be ISO.
+  5. `string` columns accept non-string config scalars.
+  6. Rule 7 extension: no time or zone directives in a `date` format; no zone directives in a `datetime` format.
+  ETL-03b creates `casting.py`, moves ETL-03's castability check onto it and fixes 1 to 6. It lands before ETL-02, ETL-04 and the ETL-05 rework, which all use it.
+- **ETL-02:** type inference per the paragraph above.
+- **ETL-05 rework:** replace the held `_config_scalar` with the shared config-scalar functions (B).
+- **QA-03c / QA-07:** fixtures exercising the rejected examples. **FE-04:** client-side checks may mirror the table but the server stays authoritative.
+
+Decisions (user, 2026-10-20):
+- **C-a:** a whitespace-only cell in a non-string column becomes null.
+- **C-b:** config date/datetime values are always ISO, regardless of the column `format`.
+- **C-c:** string-column config values must be JSON strings.
+- **C-d:** every invalid cell gets its own `type_cast` entry; the row counts once in `rejected_count`.
+- **C-e:** a `date` format may contain no time directive (`%H` `%I` `%M` `%S` `%f` `%p` `%X` `%c`) and no zone directive (`%z` `%Z`); a `datetime` format may contain no zone directive. Enforced by §6 rule 7.
+
+### Validation semantics (decision Q7, approved 2026-10-20)
+
+1. **Nulls (Q7-1).** A null fails only the nullability rules: `nullable: false` (a `not_null` rejection at the cast step) and the `not_null` validation rule. `unique`, `range`, `allowed_values`, `regex` and `length` skip nulls. A `unique` key with **any** null component is not registered and never counts as a duplicate.
+2. **Composite `unique` failures (Q7-2).** A `unique` rule with more than one column produces `RejectedRow(column=null, rule="unique")`. Its `message` names the key columns. Its `value` is the key as a compact JSON array in the rule's column order, with JSON-native values (strings quoted, numbers, `true`/`false`, dates and datetimes as ISO strings), e.g. `["a@x.com","2026-10-20"]`, truncated to 500 characters. A single-column `unique` failure sets `column` to that column and `value` to the value as text, like the other rules. Documented on the contract's `RejectedRow.value`.
+3. **`fail_run` timing and checkpoints (Q7-3).** The step that finds the first rejection of a chunk evaluates the whole chunk, then raises `RejectionLimitExceeded` naming that chunk's first rejected row (row number and rule). Counters, events and rejections are persisted only for **completed chunks** (checkpoints). The failing chunk is never reported as durably completed, and the last `StageEvent` before the failure carries the counters of the completed chunks (Q3 rule 7). This applies to every rejection kind (Q4-b).
+4. **`regex` and `length` on non-string columns (Q7-4).** §6 rule 3 rejects such configs. If the engine nevertheless meets one at run time, it raises `EtlError` (an internal error). It never converts values with `str()`.
 
 ## 6. Pipeline config semantic rules (beyond JSON Schema)
 
@@ -318,9 +386,9 @@ Enforced by `validate_pipeline_config`; reported as `ConfigErrorItem` with a JSO
 2. Every column referenced in `transformations` or `validations` is a `columns[].name`.
 3. `trim_whitespace`, `change_case`, `regex`, `length` apply only to `string` columns.
 4. `round_number` applies only to `float` columns. `range` applies only to `integer`, `float`, `date` and `datetime` columns, with numeric bounds for numbers and ISO 8601 strings for dates; if both bounds are present, `min ≤ max`.
-5. `fill_null.value` and `allowed_values.values` must be castable to the column's type.
+5. `fill_null.value` and `allowed_values.values` must be castable to the column's type. *("Castable" is defined in §5 "Value casting", decision Q6-3; this includes `range` bounds, which on `integer` columns must be integral.)*
 6. `regex.pattern` must compile with Python `re`.
-7. `format` is allowed only on `date`/`datetime` columns.
+7. `format` is allowed only on `date`/`datetime` columns. A `date` format contains no time directive (`%H` `%I` `%M` `%S` `%f` `%p` `%X` `%c`) and no zone directive (`%z` `%Z`); a `datetime` format contains no zone directive (decision C-e).
 8. When `source_columns` is given, every `columns[].source` must be among them (`SourceMismatchError` at run time; `ConfigErrorItem` at validation time).
 9. The target table name must not start with `run_` (reserved for staging).
 
