@@ -9,7 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 5173",
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "gen:api": "openapi-typescript ../contracts/openapi.yaml -o src/app/api/schema.d.ts"
   },
   "dependencies": {
