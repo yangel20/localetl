@@ -101,6 +101,14 @@ def test_every_declared_response_schema_resolves(contract: Contract) -> None:
         assert checked >= 1, f"{op.operation_id} declares no JSON body schema at all"
 
 
+def test_referenced_error_responses_resolve_to_the_error_schema(contract: Contract) -> None:
+    """Regression: a response that is itself a ``$ref`` (NotFound, Conflict...) must still be
+    validated against ``Error``, not silently treated as having no body."""
+    for op_id, status in [("getSource", 404), ("deleteSource", 409), ("createSource", 413)]:
+        ref = contract.response_schema_ref(contract.operations[op_id], status)
+        assert ref is not None and ref.endswith("#/components/schemas/Error"), (op_id, status, ref)
+
+
 @pytest.mark.parametrize(
     ("name", "valid"),
     [(p.name, True) for p in sorted((CONTRACTS / "examples/pipeline/valid").glob("*.json"))]
