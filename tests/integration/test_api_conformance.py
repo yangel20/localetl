@@ -603,12 +603,9 @@ def test_op_listSources(
         r = client.get(f"{contract.prefix}{SOURCES}", params=bad)
         conformance.assert_conforms(r)
         assert r.status_code == 422, bad
-    assert (
-        conformance.assert_conforms(
-            client.get(f"{contract.prefix}{SOURCES}", params={"limit": 200})
-        ).status_code
-        == 200
-    )
+    top = client.get(f"{contract.prefix}{SOURCES}", params={"limit": 200})
+    conformance.assert_conforms(top)
+    assert top.status_code == 200
 
 
 def test_op_getSource(
