@@ -132,7 +132,7 @@
           "$ref": "#/$defs/ColumnType"
         },
         "format": {
-          "description": "strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1).",
+          "description": "strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). A date format may not contain time directives (%H %I %M %S %f %p %X %c) or zone directives (%z %Z); a datetime format may not contain zone directives (decision C-e).",
           "type": "string",
           "minLength": 2,
           "maxLength": 64
