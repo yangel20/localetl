@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api import health, pipelines, sources
+from app.api import health, pipelines, runs, sources
 
 API_PREFIX = "/api/v1"
 
@@ -12,4 +12,5 @@ def build_api_router() -> APIRouter:
     router.include_router(health.router)
     router.include_router(sources.router)
     router.include_router(pipelines.router)
+    router.include_router(runs.router)
     return router
