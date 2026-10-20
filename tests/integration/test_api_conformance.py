@@ -1558,7 +1558,7 @@ def test_op_getRun(
     with clean.begin() as conn:
         conn.execute(
             sa.text(
-                "UPDATE runs SET started_at = now(), current_stage = 'transform","
+                "UPDATE runs SET started_at = now(), current_stage = 'transform',""
                 " extracted_count = 50, rejected_count = 3 WHERE id = :id"
             ),
             {"id": live},
@@ -1639,7 +1639,8 @@ def test_op_listRunRejections(
         "type_cast",
         "regex",
     ]  # several entries for one row, kept in insertion order
-    assert items[0]["row_number"] == 3 and items[0]["column"] is None and items[0]["rule"] == "parse_error"
+    first = items[0]
+    assert (first["row_number"], first["column"], first["rule"]) == (3, None, "parse_error")
     nullval = next(i for i in items if i["rule"] == "not_null")
     assert nullval["value"] is None
     p2 = client.get(f"{contract.prefix}{RUNS}/{done}/rejections", params={"limit": 4, "offset": 4})
