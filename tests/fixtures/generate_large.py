@@ -7,6 +7,7 @@ Default output: data/fixtures/large_orders.csv (git-ignored).
 Columns: id,email,country,status,amount,order_date,is_gift,quantity,sku,note
 Every row is valid for a pipeline that casts the obvious types.
 """
+
 from __future__ import annotations
 
 import argparse
