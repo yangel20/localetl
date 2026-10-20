@@ -258,7 +258,7 @@ def build_formats(expected: dict[str, Any]) -> None:
     write_rows("too_many_columns_501.csv", [cols(501), [str(i) for i in range(501)]])
     hostile = ['id', "name; DROP TABLE x;--", 'Robert\'); DROP TABLE students;--', 'a"b', "Order ID",
                "  padded  ", "UPPER", "run_abc", "1starts_with_digit", "ünïcode_列", "x" * 80,
-               "select", "with.dot", "with space", "", "ok"]
+               "select", "with.dot", "with space", "../../etc/passwd", "ok"]
     hrow = ["1", "'; DROP TABLE users;--", "=cmd|' /C calc'!A0", 'q"q', "5", "6", "7", "8",
             "9", "10", "11", "12", "13", "14", "15", "16"]
     write_rows("hostile_columns.csv", [hostile, hrow, ["2"] + ["v"] * 15])
@@ -286,8 +286,11 @@ def build_formats(expected: dict[str, Any]) -> None:
             'duplicate header names: "id" (columns 1, 5), "name" (columns 2, 3)'),
         "blank_lines.csv": {"rows": 3},
         "all_null_column.csv": {"null_count": {"empty_col": 3}},
-        "hostile_columns.csv": "16 columns with SQL-injection-like / non-identifier names; "
-                               "target names must be user-chosen safe identifiers",
+        "hostile_columns.csv": structure(
+            2, [], [], column_count=16, names=hostile,
+            note="accepted: 16 non-empty, unique, SQL-injection-like / non-identifier names kept "
+                 "verbatim (an empty header would be a file-level error, Q4-a, and has its own "
+                 "fixtures); target names must be user-chosen safe identifiers"),
     }
 
 

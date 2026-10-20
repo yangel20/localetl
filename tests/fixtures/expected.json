@@ -284,7 +284,32 @@
         "empty_col": 3
       }
     },
-    "hostile_columns.csv": "16 columns with SQL-injection-like / non-identifier names; target names must be user-chosen safe identifiers",
+    "hostile_columns.csv": {
+      "has_header": true,
+      "row_count": 2,
+      "well_formed_count": 2,
+      "parse_errors": [],
+      "column_count": 16,
+      "names": [
+        "id",
+        "name; DROP TABLE x;--",
+        "Robert'); DROP TABLE students;--",
+        "a\"b",
+        "Order ID",
+        "  padded  ",
+        "UPPER",
+        "run_abc",
+        "1starts_with_digit",
+        "ünïcode_列",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "select",
+        "with.dot",
+        "with space",
+        "../../etc/passwd",
+        "ok"
+      ],
+      "note": "accepted: 16 non-empty, unique, SQL-injection-like / non-identifier names kept verbatim (an empty header would be a file-level error, Q4-a, and has its own fixtures); target names must be user-chosen safe identifiers"
+    },
     "empty_header.csv": {
       "outcome": "CsvFormatError",
       "message": "header in column 2 is empty"
