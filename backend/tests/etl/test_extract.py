@@ -236,21 +236,14 @@ def test_no_header_naming() -> None:
     assert list(pv.rows[0]) == e["columns"]
 
 
-def test_hostile_column_names_pass_through_untouched(tmp_path: Path) -> None:
-    # The committed fixture has an empty header in column 15 (Q4-a rejects it: see below);
-    # with that one name filled in, every hostile name is accepted verbatim.
-    lines = (CSV / "hostile_columns.csv").read_text().splitlines(keepends=True)
-    f = tmp_path / "hostile.csv"
-    f.write_text(lines[0].replace(",,ok", ",filled,ok", 1) + "".join(lines[1:]))
-    p = inspect_csv(f, PLAIN)
-    names = [c.name for c in p.columns]
-    assert len(names) == 16 and "name; DROP TABLE x;--" in names and 'a"b' in names
-    assert "ünïcode_列" in names
-
-
-def test_committed_hostile_fixture_has_an_empty_header_so_q4a_rejects_it() -> None:
-    with pytest.raises(CsvFormatError, match="header in column 15 is empty"):
-        inspect_csv(CSV / "hostile_columns.csv", PLAIN)
+def test_hostile_column_names_are_accepted_verbatim() -> None:
+    e = FORMATS["hostile_columns.csv"]
+    p = inspect_csv(CSV / "hostile_columns.csv", PLAIN)
+    assert [c.name for c in p.columns] == e["names"] and len(e["names"]) == e["column_count"] == 16
+    assert p.row_count == e["row_count"] == 2
+    pv = preview_csv(CSV / "hostile_columns.csv", PLAIN)
+    assert [c.name for c in pv.columns] == e["names"]
+    assert list(pv.rows[0]) == e["names"] and pv.sampled_rows == 2
 
 
 # ----------------------------------------------------------- inference, nulls
