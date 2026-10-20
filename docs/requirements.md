@@ -13,7 +13,7 @@ Requirement IDs (`REQ-xx`) are referenced by tickets in `docs/task-board.md` and
 | REQ-01 | A user can upload one CSV file at a time through the UI. The API stores it under `LOCALETL_DATA_DIR` with a server-generated file name and records it as a **data source**. |
 | REQ-02 | Upload size limit is `LOCALETL_MAX_UPLOAD_MB` (default **100 MB**). Larger uploads are rejected with `413` before the file is fully stored. |
 | REQ-03 | Supported encodings: `utf-8`, `utf-8-sig`, `latin-1`, `cp1252`. Supported delimiters: `,` `;` `\t` `\|`. The user may specify encoding, delimiter, header presence and quote character at upload; defaults are `utf-8`, `,`, header present, `"`. |
-| REQ-04 | Files that are empty, header-only, undecodable in the chosen encoding, or have more than **500 columns** are rejected with a clear error message identifying the problem. |
+| REQ-04 | Files that are empty, header-only, undecodable in the chosen encoding, have more than **500 columns**, have **duplicate header names**, or whose structure cannot be parsed (e.g. a quoted field never closed) are rejected with a clear error message identifying the problem. *(Q4 proposal, not approved.)* |
 | REQ-05 | The user can preview a data source: column names, inferred column types (`integer`, `float`, `boolean`, `date`, `datetime`, `string`), null counts in the sample, and the first N rows (default 50, max 500). |
 | REQ-06 | The user can list data sources (paginated) and delete a data source that no pipeline references. |
 
@@ -32,7 +32,7 @@ Requirement IDs (`REQ-xx`) are referenced by tickets in `docs/task-board.md` and
 |---|---|
 | REQ-20 | Cleaning operations are chosen only from a fixed list: `trim_whitespace`, `change_case`, `replace_values`, `fill_null`, `drop_null_rows`, `deduplicate`, `round_number`. They run in the configured order. |
 | REQ-21 | Validation rules are chosen only from a fixed list: `not_null`, `unique`, `range`, `allowed_values`, `regex`, `length`. |
-| REQ-22 | Rows failing type casting or any validation rule are **rejected** with row number, column, rule and message. The pipeline chooses `reject_row` (continue without the row) or `fail_run` (stop the run). |
+| REQ-22 | Rows that cannot be parsed (wrong number of fields or a quoting fault confined to the row; rule `parse_error`), or that fail type casting or any validation rule, are **rejected** with row number, column, rule and message. The pipeline chooses `reject_row` (continue without the row) or `fail_run` (stop the run). *(Q4 proposal, not approved: parsing failures.)* |
 | REQ-23 | A pipeline may set `max_rejected_ratio` (0–1); computed as rejected rows ÷ extracted rows; if exceeded the run fails and nothing is published. |
 | REQ-24 | User input is never executed as code. No `eval`, `exec`, `DataFrame.query`/`DataFrame.eval` on user strings, and no user-supplied Python. |
 | REQ-25 | Each extracted row has exactly one outcome: loaded, rejected (failed parsing, casting or a validation rule), duplicate-dropped (`deduplicate`) or null-dropped (`drop_null_rows`). Rows removed by cleaning operations are not rejections. For a succeeded run, extracted = loaded + rejected + duplicate-dropped + null-dropped, across all chunks. |
