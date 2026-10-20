@@ -1,5 +1,12 @@
-import { PagePlaceholder } from '../../components/PagePlaceholder';
+import { Route, Routes } from 'react-router-dom';
+import { RunDetailPage } from './RunDetailPage';
+import { RunListPage } from './RunListPage';
 
 export function RunsPage() {
-  return <PagePlaceholder title="Runs" description="Start runs and monitor execution history." />;
+  return (
+    <Routes>
+      <Route index element={<RunListPage />} />
+      <Route path=":runId" element={<RunDetailPage />} />
+    </Routes>
+  );
 }
