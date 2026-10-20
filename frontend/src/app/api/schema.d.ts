@@ -402,7 +402,7 @@ export interface components {
             /** @description CSV header as it appears in the file (or `column_1`.. when has_header is false). */
             name: string;
             inferred_type: components["schemas"]["ColumnType"];
-            /** @description Empty values in the sampled rows. */
+            /** @description Empty values in the sampled well-formed rows (malformed records are excluded; decision Q4-c). */
             null_count: number;
         };
         DataSource: {
@@ -413,7 +413,7 @@ export interface components {
             size_bytes: number;
             csv_options: components["schemas"]["CsvOptions"];
             columns: components["schemas"]["ColumnInfo"][];
-            /** @description Data rows, excluding the header. */
+            /** @description Data records, excluding the header and blank lines. Includes malformed records (wrong field count or a quoting fault), which runs reject as parse_error and which the preview omits (decision Q4-c). */
             row_count: number;
             /** Format: date-time */
             created_at: string;
@@ -427,10 +427,11 @@ export interface components {
             /** Format: uuid */
             source_id: string;
             columns: components["schemas"]["ColumnInfo"][];
-            /** @description Raw string values keyed by column name; null for empty cells. */
+            /** @description Raw string values keyed by column name; null for empty cells. Well-formed records only; malformed records are omitted, so a clean preview does not guarantee that a run has no parse_error rejections (decision Q4-c). */
             rows: {
                 [key: string]: string | null;
             }[];
+            /** @description Well-formed records examined for this preview and its inferred types. */
             sampled_rows: number;
         };
         PipelineCreate: {
@@ -552,7 +553,7 @@ export interface components {
              */
             rule: "not_null" | "unique" | "range" | "allowed_values" | "regex" | "length" | "type_cast" | "parse_error";
             message: string;
-            /** @description Offending raw value, truncated to 500 characters. */
+            /** @description Offending raw value, truncated to 500 characters. For a composite `unique` failure (`column` null), the key as a compact JSON array in rule column order, e.g. ["a@x.com","2026-10-20"] (decision Q7-2). For `parse_error`, the record's fields joined with the delimiter (decision Q4). */
             value: string | null;
         };
         RejectedRowPage: components["schemas"]["PageMeta"] & {
@@ -721,7 +722,7 @@ export interface components {
             source: components["schemas"]["SourceColumnName"];
             name: components["schemas"]["Identifier"];
             type: components["schemas"]["ColumnType"];
-            /** @description strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). */
+            /** @description strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). A date format may not contain time directives (%H %I %M %S %f %p %X %c) or zone directives (%z %Z); a datetime format may not contain zone directives (decision C-e). */
             format?: string;
             /** @default true */
             nullable: boolean;
@@ -790,7 +791,7 @@ export interface components {
                     source: components["schemas"]["SourceColumnName"];
                     name: components["schemas"]["Identifier"];
                     type: components["schemas"]["ColumnType"];
-                    /** @description strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). */
+                    /** @description strptime format, e.g. %Y-%m-%d. Allowed only on date and datetime columns; a config that sets it on any other column type is invalid (architecture section 6, rule 7; decision Q6-1). A date format may not contain time directives (%H %I %M %S %f %p %X %c) or zone directives (%z %Z); a datetime format may not contain zone directives (decision C-e). */
                     format?: string;
                     /** @default true */
                     nullable: boolean;
