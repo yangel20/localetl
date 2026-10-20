@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ColumnMapping, ColumnType, ErrorDetail, Validation } from '../../app/api/types';
-import { isIsoDate, isIsoDatetime } from './casting';
+import { isIsoDate, isIsoDatetime, parseScalarInput } from './casting';
 import { moveItem, newValidation, RULE_LABEL, VALIDATION_RULES } from './configModel';
 import { ValueLines } from './ListInputs';
 import { btnClass, ColumnChecklist, ColumnSelect, fieldClass, PathErrors } from './ui';
@@ -20,6 +20,10 @@ function BoundInput({ label, type, value, onCommit }: { label: string; type: Col
           const t = e.target.value.trim();
           if (t === '') return onCommit(undefined);
           // Invalid text is still committed so the checker reports it at its path.
+          if (type === 'integer') {
+            const r = parseScalarInput(t, 'integer');
+            return onCommit(r.ok && typeof r.value !== 'boolean' ? r.value : t);
+          }
           onCommit(numeric && !bad(t) ? Number(t) : t);
         }}
       />

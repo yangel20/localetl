@@ -5,7 +5,7 @@
  * Error paths are JSON Pointers relative to the config, e.g. `/transformations/2/columns`.
  */
 import type { ErrorDetail } from '../../app/api/types';
-import { checkFormat, isCastableConfigScalar, isIsoDate, isIsoDatetime } from './casting';
+import { checkFormat, compareBounds, isCastableConfigScalar, isIsoDate, isIsoDatetime } from './casting';
 import { TRANSFORMATION_OPS, VALIDATION_RULES } from './configModel';
 
 const IDENT_RE = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -208,7 +208,7 @@ export function checkConfig(config: unknown, options: CheckOptions = {}): ErrorD
             if (v.min === undefined && v.max === undefined) err(p, 'Set a minimum, a maximum or both.');
             const okBound = (b: unknown): boolean => {
               if (!ty) return true;
-              if (ty === 'integer') return isInt(b);
+              if (ty === 'integer') return typeof b !== 'boolean' && isCastableConfigScalar(b, 'integer');
               if (ty === 'float') return typeof b === 'number' && Number.isFinite(b);
               if (ty === 'date') return typeof b === 'string' && isIsoDate(b);
               if (ty === 'datetime') return typeof b === 'string' && isIsoDatetime(b);
@@ -219,7 +219,7 @@ export function checkConfig(config: unknown, options: CheckOptions = {}): ErrorD
                 err(`${p}/${k}`, ty === 'date' || ty === 'datetime' ? `Use an ISO ${ty} string.` : ty === 'integer' ? 'Use a whole number.' : 'Use a number.');
               }
             }
-            if (v.min !== undefined && v.max !== undefined && okBound(v.min) && okBound(v.max) && (v.min as number | string) > (v.max as number | string)) {
+            if (v.min !== undefined && v.max !== undefined && okBound(v.min) && okBound(v.max) && ty && compareBounds(v.min as number | string, v.max as number | string, ty) > 0) {
               err(`${p}/min`, 'The minimum must not exceed the maximum.');
             }
             break;

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkFormat,
+  compareBounds,
+  normalizeIso,
   formatDirectives,
   isCastableConfigScalar as ok,
   parseScalarInput,
@@ -93,5 +95,50 @@ describe('format directives (rule 7, C-e)', () => {
   it('length 2 to 64', () => {
     expect(checkFormat('%', 'date')).toMatch(/2 to 64/);
     expect(checkFormat('%Y'.repeat(33), 'date')).toMatch(/2 to 64/);
+  });
+});
+
+describe('integer precision', () => {
+  it('keeps exact digits instead of rounding through Number', () => {
+    expect(parseScalarInput('9007199254740991', 'integer')).toEqual({ ok: true, value: 9007199254740991 });
+    expect(parseScalarInput('9007199254740992', 'integer')).toEqual({ ok: true, value: '9007199254740992' });
+    expect(parseScalarInput('9007199254740993', 'integer')).toEqual({ ok: true, value: '9007199254740993' });
+    expect(parseScalarInput('-9007199254740993', 'integer')).toEqual({ ok: true, value: '-9007199254740993' });
+    expect(parseScalarInput(' 42 ', 'integer')).toEqual({ ok: true, value: 42 });
+  });
+  it('applies the bigint bound with BigInt', () => {
+    expect(parseScalarInput('9223372036854775807', 'integer')).toEqual({ ok: true, value: '9223372036854775807' });
+    expect(parseScalarInput('-9223372036854775808', 'integer')).toEqual({ ok: true, value: '-9223372036854775808' });
+    expect(parseScalarInput('9223372036854775808', 'integer')).toMatchObject({ ok: false });
+    expect(parseScalarInput('-9223372036854775809', 'integer')).toMatchObject({ ok: false });
+  });
+  it('flags 2**63 as a JSON number and accepts the digit string for the largest value', () => {
+    expect(ok(2 ** 63, 'integer')).toBe(false);
+    expect(ok(-(2 ** 63), 'integer')).toBe(true);
+    expect(ok('9223372036854775807', 'integer')).toBe(true);
+    expect(ok('9223372036854775808', 'integer')).toBe(false);
+  });
+});
+
+describe('bound comparison by value', () => {
+  it('normalises separators, seconds and fractions', () => {
+    expect(normalizeIso('2026-01-01 10:00')).toBe('2026-01-01T10:00:00.000000');
+    expect(normalizeIso('2026-01-01T10:00:00')).toBe('2026-01-01T10:00:00.000000');
+    expect(normalizeIso('2026-01-01T10:00:00.5')).toBe('2026-01-01T10:00:00.500000');
+    expect(normalizeIso('2026-01-01')).toBe('2026-01-01');
+  });
+  it('datetime: T versus space, both orderings, and equal values written differently', () => {
+    expect(compareBounds('2026-01-01T10:00', '2026-01-01 11:00', 'datetime')).toBeLessThan(0);
+    expect(compareBounds('2026-01-01 11:00', '2026-01-01T10:00', 'datetime')).toBeGreaterThan(0);
+    expect(compareBounds('2026-01-01 10:00', '2026-01-01T10:00:00.000', 'datetime')).toBe(0);
+    expect(compareBounds('2026-01-01T10:00:00.5', '2026-01-01 10:00:00.25', 'datetime')).toBeGreaterThan(0);
+  });
+  it('date and numeric bounds', () => {
+    expect(compareBounds('2026-01-01', '2026-12-31', 'date')).toBeLessThan(0);
+    expect(compareBounds('2026-12-31', '2026-01-01', 'date')).toBeGreaterThan(0);
+    expect(compareBounds(2, 10, 'float')).toBeLessThan(0);
+    expect(compareBounds(2, 10, 'integer')).toBeLessThan(0);
+    expect(compareBounds('9007199254740993', '9007199254740992', 'integer')).toBeGreaterThan(0);
+    expect(compareBounds('9007199254740993', 9007199254740992, 'integer')).toBeGreaterThan(0);
   });
 });

@@ -47,7 +47,8 @@ export function isCastableConfigScalar(value: unknown, type: ColumnType): boolea
     case 'integer':
       if (typeof value === 'boolean') return false;
       if (typeof value === 'number') {
-        return Number.isInteger(value) && value >= -(2 ** 63) && value <= 2 ** 63 - 1;
+        // 2**63 - 1 is not representable as a double (it rounds to 2**63), so the upper bound is exclusive.
+        return Number.isInteger(value) && value >= -(2 ** 63) && value < 2 ** 63;
       }
       return typeof value === 'string' && isIntegerText(value.trim());
     case 'float':
@@ -74,8 +75,14 @@ export function parseScalarInput(text: string, type: ColumnType): ParsedScalar {
   switch (type) {
     case 'string':
       return { ok: true, value: text }; // never stripped
-    case 'integer':
-      return isIntegerText(t) ? { ok: true, value: Number(t) } : bad('a whole number');
+    case 'integer': {
+      if (!INT_RE.test(t)) return bad('a whole number');
+      if (!isIntegerText(t)) return bad('a whole number within the 64-bit range');
+      // Never send a silently rounded number: beyond 2**53 - 1 keep the digits the user typed
+      // (the server accepts an integer string for integer config scalars).
+      const exact = BigInt(t) >= BigInt(Number.MIN_SAFE_INTEGER) && BigInt(t) <= BigInt(Number.MAX_SAFE_INTEGER);
+      return { ok: true, value: exact ? Number(t) : t };
+    }
     case 'float':
       return isFloatText(t) ? { ok: true, value: Number(t) } : bad('a number');
     case 'boolean': {
@@ -117,4 +124,29 @@ export function checkFormat(format: string, type: ColumnType): string | null {
     return 'a date format may not contain time directives (%H %I %M %S %f %p %X %c)';
   }
   return null;
+}
+
+/**
+ * Canonical form of an ISO date or datetime: `T` separator, seconds always present, fraction padded to
+ * 6 digits. Equal instants written differently normalise to the same string, and the strings sort
+ * chronologically. Input must already satisfy isIsoDate / isIsoDatetime.
+ */
+export function normalizeIso(s: string): string {
+  const m = DATETIME_RE.exec(s);
+  if (!m) return s; // a plain date
+  const frac = /\.([0-9]{1,6})$/.exec(s)?.[1] ?? '';
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] ?? '00'}.${frac.padEnd(6, '0')}`;
+}
+
+/** Compares two valid range bounds of a column type by value. Negative when a < b. */
+export function compareBounds(a: number | string, b: number | string, type: ColumnType): number {
+  if (type === 'integer') {
+    const x = BigInt(typeof a === 'number' ? a : a.trim());
+    const y = BigInt(typeof b === 'number' ? b : b.trim());
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
+  if (type === 'float') return Number(a) - Number(b);
+  const x = normalizeIso(String(a));
+  const y = normalizeIso(String(b));
+  return x < y ? -1 : x > y ? 1 : 0;
 }

@@ -109,6 +109,32 @@ describe('section 6 rules', () => {
   });
 });
 
+describe('range bounds are compared by value', () => {
+  const rangeOn = (column: string, min: unknown, max: unknown) => ({ ...base(), validations: [{ rule: 'range', column, min, max }] });
+  const dt = () => ({ ...base(), columns: [{ source: 'ts', name: 'ts', type: 'datetime' }] });
+  const withRange = (min: string, max: string) => ({ ...dt(), validations: [{ rule: 'range', column: 'ts', min, max }] });
+
+  it('datetime: T and space separators order correctly', () => {
+    expect(paths(withRange('2026-01-01T10:00', '2026-01-01 11:00'))).toEqual([]); // was a false positive
+    expect(paths(withRange('2026-01-01 11:00', '2026-01-01T10:00'))).toEqual(['/validations/0/min']); // was a false pass
+  });
+  it('datetime: equal values written differently are accepted', () => {
+    expect(paths(withRange('2026-01-01 10:00', '2026-01-01T10:00:00.000'))).toEqual([]);
+  });
+  it('date and numbers still order correctly', () => {
+    expect(paths(rangeOn('when', '2026-01-01', '2026-12-31'))).toEqual([]);
+    expect(paths(rangeOn('when', '2026-12-31', '2026-01-01'))).toEqual(['/validations/0/min']);
+    expect(paths(rangeOn('amt', 2, 10))).toEqual([]);
+    expect(paths(rangeOn('id', 10, 2))).toEqual(['/validations/0/min']);
+  });
+  it('large integer bounds as digit strings are accepted and compared exactly', () => {
+    expect(paths(rangeOn('id', '9007199254740992', '9007199254740993'))).toEqual([]);
+    expect(paths(rangeOn('id', '9007199254740993', '9007199254740992'))).toEqual(['/validations/0/min']);
+    expect(paths(rangeOn('id', 0, '9223372036854775808'))).toEqual(['/validations/0/max']);
+    expect(paths(rangeOn('id', 0, 2 ** 63))).toEqual(['/validations/0/max']);
+  });
+});
+
 describe('normalizeErrorPath', () => {
   it('strips the request prefix', () => {
     expect(normalizeErrorPath('/config/columns/0/name')).toBe('/columns/0/name');
