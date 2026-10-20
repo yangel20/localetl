@@ -12,6 +12,9 @@ import pytest
 from app.etl import ConfigValidationError, PipelineConfig, validate_pipeline_config
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "contracts" / "examples" / "pipeline"
+FIXTURE_PIPELINES = sorted(
+    (EXAMPLES.parents[2] / "tests" / "fixtures" / "pipelines").glob("*.json")
+)
 VALID = sorted((EXAMPLES / "valid").glob("*.json"))
 INVALID = sorted((EXAMPLES / "invalid").glob("*.json"))
 
@@ -56,6 +59,12 @@ def test_valid_examples_pass(path: Path) -> None:
     result = validate_pipeline_config(raw)
     assert isinstance(result, PipelineConfig)
     assert result.raw == raw
+
+
+@pytest.mark.parametrize("path", FIXTURE_PIPELINES, ids=lambda p: p.name)
+def test_fixture_pipelines_validate(path: Path) -> None:
+    assert FIXTURE_PIPELINES
+    validate_pipeline_config(json.loads(path.read_text()))
 
 
 @pytest.mark.parametrize("path", INVALID, ids=lambda p: p.name)
@@ -311,25 +320,54 @@ def test_rule4_min_not_above_max(col: str, lo: Any, hi: Any) -> None:
     ]
 
 
-def test_rule4_mixed_timezone_bounds_not_comparable() -> None:
-    v = {
-        "rule": "range",
-        "column": "at",
-        "min": "2024-01-01T00:00:00+00:00",
-        "max": "2024-02-01T00:00:00",
-    }
-    assert paths_of(base(validations=[v])) == ["/validations/0"]
+@pytest.mark.parametrize("bound", ["2024-01-01T00:00:00+00:00", "2024-01-01T00:00:00Z"])
+def test_rule4_datetime_bounds_reject_offsets(bound: str) -> None:
+    v = {"rule": "range", "column": "at", "min": bound}
+    assert paths_of(base(validations=[v])) == ["/validations/0/min"]
+
+
+def test_rule4_datetime_bound_without_seconds_is_valid() -> None:
+    v = {"rule": "range", "column": "at", "min": "2024-01-01T00:00"}
+    validate_pipeline_config(base(validations=[v]))
+
+
+def test_rule4_integer_bounds_must_be_integral() -> None:
+    ok = base(validations=[{"rule": "range", "column": "qty", "min": 1.0, "max": 10}])
+    validate_pipeline_config(ok)
+    bad = base(validations=[{"rule": "range", "column": "qty", "min": 0.5, "max": 2}])
+    assert paths_of(bad) == ["/validations/0/min"]
+    big = base(validations=[{"rule": "range", "column": "qty", "max": 2**63}])
+    assert paths_of(big) == ["/validations/0/max"]
+
+
+def test_rule4_compact_and_week_dates_rejected() -> None:
+    for bound in ("20240101", "2024-W01-1", "2024-01-01T00:00:00"):
+        assert paths_of(base(validations=[{"rule": "range", "column": "day", "min": bound}])) == [
+            "/validations/0/min"
+        ]
 
 
 @pytest.mark.parametrize(
     ("col", "good", "bad"),
     [
-        ("qty", [3, "4", 5.0, " 7 "], [1.5, "x", True, "1.5"]),
-        ("price", [1, 2.5, "3.25"], ["abc", True, "nan", "inf"]),
+        (
+            "qty",
+            [3, "4", 5.0, " 7 ", "+8", "007"],
+            [1.5, "x", True, "1.5", "1_000", "١٢", 2**63, "1e3"],
+        ),
+        (
+            "price",
+            [1, 2.5, "3.25", ".5", "1e3", "5."],
+            ["abc", True, "nan", "inf", "1,5", "1_0.5", "1e400"],
+        ),
         ("ok", [True, 0, 1, "Yes", "NO", "true"], ["maybe", 2, "2"]),
-        ("day", ["2024-01-31"], ["2024-02-30", "31/01/2024", 5]),
-        ("at", ["2024-01-31T10:00:00", "2024-01-31"], ["yesterday", 3]),
-        ("name", ["a", 1, True, 2.5], []),
+        ("day", ["2024-01-31"], ["2024-02-30", "31/01/2024", 5, "20240131", "2024-W05-3"]),
+        (
+            "at",
+            ["2024-01-31T10:00:00", "2024-01-31 10:00", "2024-01-31T10:00:00.25"],
+            ["yesterday", 3, "2024-01-31", "2024-01-31T10:00:00Z"],
+        ),
+        ("name", ["a", ""], [1, True, 2.5]),
     ],
 )
 def test_rule5_castable_fill_null_and_allowed_values(
@@ -353,12 +391,12 @@ def test_rule5_castable_fill_null_and_allowed_values(
         assert paths_of(cfg) == [f"/validations/0/values/{i}" for i in range(1, len(bad) + 1)]
 
 
-def test_rule5_uses_column_format() -> None:
+def test_rule5_ignores_column_format_config_dates_are_iso() -> None:
     cfg = base()
     cfg["columns"][3]["format"] = "%d/%m/%Y"
-    cfg["transformations"] = [{"op": "fill_null", "column": "day", "value": "31/01/2024"}]
-    validate_pipeline_config(cfg)
     cfg["transformations"] = [{"op": "fill_null", "column": "day", "value": "2024-01-31"}]
+    validate_pipeline_config(cfg)
+    cfg["transformations"] = [{"op": "fill_null", "column": "day", "value": "31/01/2024"}]
     assert paths_of(cfg) == ["/transformations/0/value"]
 
 
@@ -401,3 +439,31 @@ def test_rule9_reserved_run_prefix() -> None:
     validate_pipeline_config(cfg)
     cfg["target"]["table"] = "run_abc"
     assert paths_of(cfg) == ["/target/table"]
+
+
+@pytest.mark.parametrize("fmt", ["%Y-%m-%d", "%d/%m/%Y", "%d %B %Y", "%y%%%m%d", "%%H"])
+def test_rule7_date_format_ok(fmt: str) -> None:
+    cfg = base()
+    cfg["columns"][3]["format"] = fmt
+    validate_pipeline_config(cfg)
+
+
+@pytest.mark.parametrize("directive", list("HIMSfpXcz") + ["Z"])
+def test_rule7_date_format_rejects_time_and_zone_directives(directive: str) -> None:
+    cfg = base()
+    cfg["columns"][3]["format"] = f"%Y-%m-%d %{directive}"
+    assert paths_of(cfg) == ["/columns/3/format"]
+
+
+@pytest.mark.parametrize("fmt", ["%Y-%m-%d %H:%M:%S", "%d/%m/%Y %I:%M %p", "%Y%m%dT%H%M%S.%f"])
+def test_rule7_datetime_format_allows_time_directives(fmt: str) -> None:
+    cfg = base()
+    cfg["columns"][4]["format"] = fmt
+    validate_pipeline_config(cfg)
+
+
+@pytest.mark.parametrize("directive", ["z", "Z"])
+def test_rule7_datetime_format_rejects_zone_directives(directive: str) -> None:
+    cfg = base()
+    cfg["columns"][4]["format"] = f"%Y-%m-%d %H:%M:%S %{directive}"
+    assert paths_of(cfg) == ["/columns/4/format"]
