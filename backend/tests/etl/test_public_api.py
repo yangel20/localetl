@@ -101,6 +101,14 @@ def test_error_hierarchy() -> None:
     assert err.errors == items
 
 
+def test_etl_error_carries_an_empty_rejected_sample_per_instance() -> None:
+    a, b = etl.EtlError("x"), etl.LoadError("y")
+    assert a.rejected_sample == [] and b.rejected_sample == []
+    a.rejected_sample.append(etl.RejectedRow(1, None, "parse_error", "m", None))
+    assert b.rejected_sample == []
+    assert etl.ConfigValidationError([]).rejected_sample == []
+
+
 def _params(fn: object) -> list[tuple[str, str, bool]]:
     sig = inspect.signature(fn)  # type: ignore[arg-type]
     return [
