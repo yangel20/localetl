@@ -59,3 +59,34 @@ None blocking. Notes:
 - `ruff check`: pass · `ruff format --check`: 32 files formatted
 - `contracts/tools/check_contracts.py .`: 0 failures (with the two packages installed as noted)
 - Worktree clean after the run.
+
+---
+
+# Re-review after rework (2026-10-20): ETL-05 rework at **0c009f0**
+
+- Target: `etl/ETL-05-validate-stage` @ **0c009f0**, two commits on `4cd8cdd`: `b53562e` (the implementation I passed earlier as 79f25b0, rebased) and `0c009f0` (rework for approved casting and Q7). `main` is now 0d2af70. Files: `backend/app/etl/validate.py`, `backend/tests/etl/test_validate.py` only.
+- Scope: removal of the casting hold, Q7-1, Q7-2, Q7-3, Q7-4, plus a regression pass over the earlier checks.
+
+## Verdict: **PASS**
+No defects. The earlier "Held" list is closed and the earlier "Needs ruling" points 1 to 4 are now decided by Q7 and implemented as decided.
+
+## Checks
+| Check | Result |
+|---|---|
+| Hold removed | `_config_scalar`, the private regexes and `NotImplementedError("pending casting specification Q6-3")` are gone (grep: none, in code and tests). Config values go through `casting.cast_config_value` (Q6-3 table B); an invalid scalar raises `EtlError` when the `Validator` is built. The module imports only stdlib, pandas and `app.etl` siblings |
+| Config scalars (my own cases) | integer `allowed_values` `[5.0, "7"]` accepts cells 5 and 7, rejects 8; float `[1, "2.5"]`; boolean `1` and `"no"`; ISO date and datetime (`"2026-10-20 10:00"`); string stays case-sensitive; `range` on integer, float, date and datetime including one-sided bounds. Rejected at construction: `True` or `5.5` or `2**63` for integer, `inf` for float, `20261020` for date, `…Z` for datetime, `5` for string, `2` for boolean |
+| Q7-1 nulls | a null fails only `not_null`; `unique`, `range`, `allowed_values`, `regex` and `length` skip nulls (all five on null cells: no rejections). A composite `unique` key with **any** null component is never registered and never a duplicate: `("x",None)` repeated, `(None,None)` repeated and `("x",None)` across two chunks all pass, while a later full `("x","y")` duplicate is rejected |
+| Q7-2 composite value | `column = None`, message names the key columns (`duplicate value for unique key (email, d, n, f, b, t)`), `value` is a compact JSON array in rule order with JSON-native values: `["a@x.com","2026-10-20",5,1.5,true,"2026-10-20T10:00:05"]`. A comma and a quote inside values are escaped (`["x, y","q\"uote"]`), non-ASCII stays unescaped, a newline is escaped, and 400+400-character values truncate to 500. Single-column failures set `column` and the text value (`p`, `true`, `1.5`) |
+| Q7-3 `fail_run` | the whole chunk is evaluated, then `RejectionLimitExceeded` names the first rejected row and rule (chunk `[7, None, 1, None]` with not_null + range min 5 → `row 11 failed not_null`); counters are not touched on the raising call (`rejected_rows` stays 0); the next clean chunk validates normally |
+| Q7-4 | `regex` or `length` on a non-string column: `EtlError` when the `Validator` is built (`validate: regex applies only to string columns; 'n' is integer`); a non-string value that reaches a string column (`5`, `True`) raises `EtlError` and is never converted with `str()` |
+| Regression of the earlier checks | six rules and the completeness test, one entry per failing rule, a row counted once, first occurrence kept across chunks, ratio strict `>`, regex 10,000-character value cap, 500-character truncation, original index kept: all still covered (43 tests in `test_validate.py`) |
+
+## Suites (detached 0c009f0, shared Postgres 127.0.0.1:55432)
+- `scripts/test-all.sh` (main's copy; the branch predates QA-04, so I ran it as an untracked file and removed it afterwards): 14 of 16 steps pass: hygiene, check_contracts, Redocly, mypy app, `mypy --strict app/etl`, `pytest backend/tests` (**412 passed**; `test_validate.py`: 43), fixtures (46), integration (33 passed, 21 skipped), and all six frontend steps (33 tests). The two failing steps are `ruff check`/`format --check backend tests`, and they fail **only in `tests/fixtures/*.py`, which this branch does not touch** (its base predates QA-04's lint fix `c95c4ba`). Run on the branch's own paths, `ruff check` and `ruff format --check` over `backend` pass from the root and from `backend/` (37 files). They will pass after a rebase onto main.
+- Worktree clean afterwards.
+
+## Needs ruling
+None new. The earlier points 1 to 4 are closed by Q7 (null skipping, composite value shape, `fail_run` timing, `regex` on non-strings).
+
+## Defects
+None. Info: the per-cell Python loops are unchanged; throughput should be measured in ETL-07 (REQ-61).
