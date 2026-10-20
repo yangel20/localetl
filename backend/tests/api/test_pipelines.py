@@ -413,7 +413,7 @@ def test_served_openapi_has_pipeline_operations(api_client: TestClient) -> None:
     ops = {
         op["operationId"]
         for path, item in spec["paths"].items()
-        if path.startswith("/api/v1/pipelines")
+        if path.startswith("/api/v1/pipelines") and not path.endswith("/runs")
         for op in item.values()
     }
     assert ops == {

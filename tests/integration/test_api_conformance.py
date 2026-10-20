@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -47,11 +49,11 @@ COVERAGE: dict[str, str] = {
     "getPipeline": COVERED,
     "updatePipeline": COVERED,
     "deletePipeline": COVERED,
-    "createRun": "pending: BE-05",
-    "listRuns": "pending: BE-05",
-    "getRun": "pending: BE-05",
-    "listRunEvents": "pending: BE-05",
-    "listRunRejections": "pending: BE-05",
+    "createRun": COVERED,
+    "listRuns": COVERED,
+    "getRun": COVERED,
+    "listRunEvents": COVERED,
+    "listRunRejections": COVERED,
     "listDatasets": "pending: BE-06",
     "getDataset": "pending: BE-06",
     "listDatasetRows": "pending: BE-06",
@@ -1190,3 +1192,471 @@ def test_validatePipelineConfig_source_columns_and_errors(
         assert all(e["path"] == "/config" or e["path"].startswith("/config/") for e in errors), (
             f.name
         )
+
+
+# ----------------------------------------------------------------------------------------------
+# BE-05: runs (createRun, listRuns, getRun, listRunEvents, listRunRejections).
+# The API only queues runs; every later status change belongs to the worker, so tests that need
+# runs in other states, events or rejections arrange those rows directly.
+# ----------------------------------------------------------------------------------------------
+
+RUNS = "/runs"
+COUNTERS = (
+    "extracted_count",
+    "loaded_count",
+    "rejected_count",
+    "duplicate_dropped_count",
+    "null_dropped_count",
+)
+
+
+def queue_run(client: httpx.Client, contract: Contract, pipeline_id: str) -> httpx.Response:
+    return client.post(f"{contract.prefix}{PIPELINES}/{pipeline_id}/runs")
+
+
+def pipeline_with_source(
+    client: httpx.Client, contract: Contract, name: str = "p"
+) -> tuple[str, str]:
+    sid = make_source(client, contract, name=f"src-{name}")
+    return sid, str(create_pipeline(client, contract, sid, name).json()["id"])
+
+
+def add_finished_run(
+    engine: sa.Engine,
+    pipeline_id: str,
+    *,
+    status: str = "succeeded",
+    queued_at: str = "2026-10-20T10:00:00Z",
+    started_at: str | None = "2026-10-20T10:00:01Z",
+    finished_at: str | None = "2026-10-20T10:00:03.500Z",
+    counters: tuple[int, int, int, int, int] = (10, 6, 2, 1, 1),
+    error_message: str | None = None,
+) -> str:
+    run_id = str(uuid.uuid4())
+    values = dict(zip(COUNTERS, counters, strict=True))
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "INSERT INTO runs (id, pipeline_id, pipeline_name, config_snapshot, config_version,"
+                " status, queued_at, started_at, finished_at, error_message, extracted_count,"
+                " loaded_count, rejected_count, duplicate_dropped_count, null_dropped_count)"
+                " VALUES (:id, :pid, 'p', '{}', 1, CAST(:status AS run_status), :queued, :started,"
+                " :finished, :err, :extracted_count, :loaded_count, :rejected_count,"
+                " :duplicate_dropped_count, :null_dropped_count)"
+            ),
+            {
+                "id": run_id,
+                "pid": pipeline_id,
+                "status": status,
+                "queued": queued_at,
+                "started": started_at,
+                "finished": finished_at,
+                "err": error_message,
+                **values,
+            },
+        )
+    return run_id
+
+
+def add_events(
+    engine: sa.Engine, run_id: str, events: list[tuple[str, str, int | None, int | None]]
+) -> None:
+    with engine.begin() as conn:
+        for stage, status, rows_in, rows_out in events:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO run_events (run_id, stage, status, rows_in, rows_out, message)"
+                    " VALUES (:r, :stage, :status, :rin, :rout, :msg)"
+                ),
+                {
+                    "r": run_id,
+                    "stage": stage,
+                    "status": status,
+                    "rin": rows_in,
+                    "rout": rows_out,
+                    "msg": "note" if status == "failed" else None,
+                },
+            )
+
+
+def add_rejections(
+    engine: sa.Engine, run_id: str, rows: list[tuple[int, str | None, str, str, str | None]]
+) -> None:
+    with engine.begin() as conn:
+        for row_number, column, rule, message, value in rows:
+            conn.execute(
+                sa.text(
+                    "INSERT INTO run_rejections"
+                    " (run_id, row_number, column_name, rule, message, value)"
+                    " VALUES (:r, :n, :c, :rule, :m, :v)"
+                ),
+                {"r": run_id, "n": row_number, "c": column, "rule": rule, "m": message, "v": value},
+            )
+
+
+def run_row(engine: sa.Engine, run_id: str) -> sa.Row[tuple[object, ...]]:
+    with engine.connect() as conn:
+        return conn.execute(sa.text("SELECT * FROM runs WHERE id = :id"), {"id": run_id}).one()
+
+
+def test_op_createRun(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    _, pid = pipeline_with_source(client, contract)
+    pipeline = client.get(f"{contract.prefix}{PIPELINES}/{pid}").json()
+    r = queue_run(client, contract, pid)
+    assert conformance.assert_conforms(r).operation_id == "createRun"
+    assert r.status_code == 202
+    run = r.json()
+    assert run["status"] == "queued" and run["pipeline_id"] == pid and run["pipeline_name"] == "p"
+    assert (
+        run["source_id"] == pipeline["source_id"]
+        and run["config_version"] == pipeline["config_version"]
+    )
+    assert [run[c] for c in COUNTERS] == [0, 0, 0, 0, 0]
+    for field in (
+        "current_stage",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "dataset_id",
+        "error_message",
+    ):
+        assert run[field] is None, field
+    row = run_row(clean, run["id"])
+    assert (
+        row.config_snapshot == pipeline["config"]
+    )  # the snapshot is a copy of the pipeline config
+    assert row.worker_id is None and row.heartbeat_at is None
+
+
+def test_createRun_never_executes_and_nothing_changes_status(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    _, pid = pipeline_with_source(client, contract)
+    run_id = queue_run(client, contract, pid).json()["id"]
+    time.sleep(1.0)
+    for _ in range(3):
+        got = client.get(f"{contract.prefix}{RUNS}/{run_id}")
+        conformance.assert_conforms(got)
+        assert got.json()["status"] == "queued" and got.json()["started_at"] is None
+    with clean.connect() as conn:
+        tables = conn.execute(
+            sa.text("SELECT count(*) FROM pg_tables WHERE schemaname IN ('datasets', 'staging')")
+        ).scalar_one()
+    assert tables == 0 and count(clean, "run_events") == 0 and count(clean, "run_rejections") == 0
+    # there is no API to change a run: other methods are 405 with an Allow header
+    for method in ("PUT", "PATCH", "DELETE"):
+        r = client.request(method, f"{contract.prefix}{RUNS}/{run_id}")
+        conformance.assert_error_body(r, 405, "method_not_allowed")
+        assert "GET" in r.headers["allow"]
+    conformance.assert_error_body(
+        client.post(f"{contract.prefix}{RUNS}/{run_id}/cancel"), 404, "not_found"
+    )
+    assert run_row(clean, run_id).status == "queued"
+
+
+def test_createRun_snapshot_is_frozen(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    sid, pid = pipeline_with_source(client, contract)
+    first = queue_run(client, contract, pid).json()
+    changed = orders_config()
+    changed["target"] = {"table": "later", "mode": "append"}  # type: ignore[index]
+    assert (
+        client.put(
+            f"{contract.prefix}{PIPELINES}/{pid}", json=body(sid, "p", config=changed)
+        ).status_code
+        == 200
+    )
+    assert run_row(clean, first["id"]).config_snapshot == orders_config()
+    assert client.get(f"{contract.prefix}{RUNS}/{first['id']}").json()["config_version"] == 1
+    with clean.begin() as conn:
+        conn.execute(
+            sa.text("UPDATE runs SET status = 'failed', finished_at = now() WHERE id = :id"),
+            {"id": first["id"]},
+        )
+    second = queue_run(client, contract, pid)
+    conformance.assert_conforms(second)
+    assert second.status_code == 202 and second.json()["config_version"] == 2
+    assert run_row(clean, second.json()["id"]).config_snapshot["target"] == {
+        "table": "later",
+        "mode": "append",
+    }
+
+
+@pytest.mark.parametrize("state", ["queued", "running"])
+def test_createRun_409_when_the_pipeline_has_an_active_run(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine, state: str
+) -> None:
+    sid, pid = pipeline_with_source(client, contract)
+    first = queue_run(client, contract, pid).json()["id"]
+    if state == "running":
+        with clean.begin() as conn:
+            conn.execute(
+                sa.text("UPDATE runs SET status = 'running', started_at = now() WHERE id = :id"),
+                {"id": first},
+            )
+    r = queue_run(client, contract, pid)
+    conformance.assert_conforms(r)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "conflict"
+    assert count(clean, "runs") == 1
+    # another pipeline is independent
+    other = create_pipeline(client, contract, sid, "other").json()["id"]
+    ok = queue_run(client, contract, other)
+    conformance.assert_conforms(ok)
+    assert ok.status_code == 202
+    # after the first run ends, the pipeline can be queued again
+    with clean.begin() as conn:
+        conn.execute(
+            sa.text(
+                "UPDATE runs SET status = 'succeeded', loaded_count = 0, extracted_count = 0,"
+                " finished_at = now() WHERE id = :id"
+            ),
+            {"id": first},
+        )
+    again = queue_run(client, contract, pid)
+    conformance.assert_conforms(again)
+    assert again.status_code == 202
+
+
+def test_createRun_concurrent_requests_queue_exactly_one(
+    app_under_test: FastAPI,
+    conformance: Conformance,
+    contract: Contract,
+    clean: sa.Engine,
+    api: Callable[[], httpx.Client],
+) -> None:
+    with api() as client:
+        _, pid = pipeline_with_source(client, contract)
+    codes: list[int] = []
+
+    def go() -> None:
+        with api() as c:
+            codes.append(queue_run(c, contract, pid).status_code)
+
+    threads = [threading.Thread(target=go) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(codes) == [202] + [409] * 7, codes
+    assert count(clean, "runs") == 1
+
+
+def test_createRun_404_and_malformed_id(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    r = queue_run(client, contract, str(uuid.uuid4()))
+    conformance.assert_conforms(r)
+    assert r.status_code == 404 and count(clean, "runs") == 0
+    conformance.assert_error_body(
+        queue_run(client, contract, "not-a-uuid"), 422, "validation_error"
+    )
+
+
+def test_op_listRuns(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    empty = client.get(f"{contract.prefix}{RUNS}")
+    assert conformance.assert_conforms(empty).operation_id == "listRuns"
+    assert empty.json() == {"total": 0, "limit": 50, "offset": 0, "items": []}
+    sid, pid = pipeline_with_source(client, contract, "a")
+    other = create_pipeline(client, contract, sid, "b").json()["id"]
+    r1 = add_finished_run(
+        clean, pid, status="failed", queued_at="2026-10-20T09:00:00Z", counters=(5, 0, 5, 0, 0)
+    )
+    r2 = add_finished_run(clean, pid, status="succeeded", queued_at="2026-10-20T10:00:00Z")
+    r3 = add_finished_run(
+        clean,
+        other,
+        status="interrupted",
+        queued_at="2026-10-20T11:00:00Z",
+        counters=(3, 0, 1, 0, 0),
+    )
+    running = add_run(clean, pid, "running", "2026-10-20T12:00:00Z")
+    page = client.get(f"{contract.prefix}{RUNS}")
+    conformance.assert_conforms(page)
+    assert page.json()["total"] == 4 and [i["id"] for i in page.json()["items"]] == [
+        running,
+        r3,
+        r2,
+        r1,
+    ]  # newest first
+    for item in page.json()["items"]:
+        assert set(COUNTERS) <= set(item)
+    by_pipeline = client.get(f"{contract.prefix}{RUNS}", params={"pipeline_id": pid})
+    conformance.assert_conforms(by_pipeline)
+    assert [i["id"] for i in by_pipeline.json()["items"]] == [
+        running,
+        r2,
+        r1,
+    ] and by_pipeline.json()["total"] == 3
+    by_status = client.get(f"{contract.prefix}{RUNS}", params={"status": "succeeded"})
+    conformance.assert_conforms(by_status)
+    assert [i["id"] for i in by_status.json()["items"]] == [r2]
+    both = client.get(f"{contract.prefix}{RUNS}", params={"pipeline_id": pid, "status": "failed"})
+    conformance.assert_conforms(both)
+    assert [i["id"] for i in both.json()["items"]] == [r1]
+    nobody = client.get(f"{contract.prefix}{RUNS}", params={"pipeline_id": str(uuid.uuid4())})
+    conformance.assert_conforms(nobody)
+    assert nobody.json()["items"] == [] and nobody.json()["total"] == 0
+    p2 = client.get(f"{contract.prefix}{RUNS}", params={"limit": 2, "offset": 1})
+    conformance.assert_conforms(p2)
+    assert [i["id"] for i in p2.json()["items"]] == [r3, r2] and p2.json()["total"] == 4
+    for bad in (
+        {"status": "paused"},
+        {"pipeline_id": "x"},
+        {"limit": 0},
+        {"limit": 201},
+        {"offset": -1},
+    ):
+        e = client.get(f"{contract.prefix}{RUNS}", params=bad)
+        conformance.assert_conforms(e)
+        assert e.status_code == 422, bad
+
+
+def test_op_getRun(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    _, pid = pipeline_with_source(client, contract)
+    done = add_finished_run(clean, pid)  # succeeded; counters 10 = 6 + 2 + 1 + 1
+    r = client.get(f"{contract.prefix}{RUNS}/{done}")
+    assert conformance.assert_conforms(r).operation_id == "getRun"
+    run = r.json()
+    assert (
+        run["extracted_count"],
+        run["loaded_count"],
+        run["rejected_count"],
+        run["duplicate_dropped_count"],
+        run["null_dropped_count"],
+    ) == (10, 6, 2, 1, 1)
+    assert (
+        run["extracted_count"]
+        == run["loaded_count"]
+        + run["rejected_count"]
+        + run["duplicate_dropped_count"]
+        + run["null_dropped_count"]
+    )
+    assert run["duration_ms"] == 2500 and run["pipeline_id"] == pid and run["error_message"] is None
+    failed = add_finished_run(
+        clean,
+        pid,
+        status="failed",
+        queued_at="2026-10-20T11:00:00Z",
+        counters=(4, 0, 1, 0, 0),
+        error_message="boom",
+    )
+    f = client.get(f"{contract.prefix}{RUNS}/{failed}")
+    conformance.assert_conforms(f)
+    assert (
+        f.json()["error_message"] == "boom"
+        and f.json()["loaded_count"] == 0
+        and f.json()["status"] == "failed"
+    )
+    live = add_run(clean, pid, "running", "2026-10-20T12:00:00Z")
+    with clean.begin() as conn:
+        conn.execute(
+            sa.text(
+                "UPDATE runs SET started_at = now(), current_stage = 'transform',"
+                " extracted_count = 50, rejected_count = 3 WHERE id = :id"
+            ),
+            {"id": live},
+        )
+    lr = client.get(f"{contract.prefix}{RUNS}/{live}")
+    conformance.assert_conforms(lr)
+    assert (
+        lr.json()["duration_ms"] is None
+        and lr.json()["current_stage"] == "transform"
+        and lr.json()["extracted_count"] == 50
+    )
+    missing = client.get(f"{contract.prefix}{RUNS}/{uuid.uuid4()}")
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    conformance.assert_error_body(
+        client.get(f"{contract.prefix}{RUNS}/not-a-uuid"), 422, "validation_error"
+    )
+
+
+def test_op_listRunEvents(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    _, pid = pipeline_with_source(client, contract)
+    queued = queue_run(client, contract, pid).json()["id"]
+    none = client.get(f"{contract.prefix}{RUNS}/{queued}/events")
+    assert conformance.assert_conforms(none).operation_id == "listRunEvents"
+    assert none.status_code == 200 and none.json() == []
+    done = add_finished_run(clean, pid, queued_at="2026-10-21T10:00:00Z")
+    plan = [
+        ("extract", "started", None, None),
+        ("extract", "progress", None, 10),
+        ("transform", "started", None, None),
+        ("transform", "completed", 10, 8),
+        ("load", "failed", 8, None),
+        ("publish", "completed", 8, 8),
+    ]
+    add_events(clean, done, plan)
+    r = client.get(f"{contract.prefix}{RUNS}/{done}/events")
+    conformance.assert_conforms(r)
+    events = r.json()
+    assert [
+        (e["stage"], e["status"], e["rows_in"], e["rows_out"]) for e in events
+    ] == plan  # in insertion order
+    assert [e["id"] for e in events] == sorted(e["id"] for e in events) and all(
+        e["run_id"] == done for e in events
+    )
+    assert events[4]["message"] == "note" and events[0]["message"] is None
+    missing = client.get(f"{contract.prefix}{RUNS}/{uuid.uuid4()}/events")
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    conformance.assert_error_body(
+        client.get(f"{contract.prefix}{RUNS}/not-a-uuid/events"), 422, "validation_error"
+    )
+
+
+def test_op_listRunRejections(
+    client: httpx.Client, conformance: Conformance, contract: Contract, clean: sa.Engine
+) -> None:
+    _, pid = pipeline_with_source(client, contract)
+    done = add_finished_run(clean, pid)
+    empty = client.get(f"{contract.prefix}{RUNS}/{done}/rejections")
+    assert conformance.assert_conforms(empty).operation_id == "listRunRejections"
+    assert empty.json() == {"total": 0, "limit": 50, "offset": 0, "items": []}
+    rows = [
+        (7, "amount", "type_cast", "cannot cast", "abc"),
+        (3, None, "parse_error", "expected 3 fields, found 2", "3,x"),
+        (7, "email", "regex", "does not match", "no-at"),
+        (12, "id", "not_null", "must not be null", None),
+    ] + [(20 + i, "n", "range", "out of range", str(i)) for i in range(6)]
+    add_rejections(clean, done, rows)
+    page = client.get(f"{contract.prefix}{RUNS}/{done}/rejections")
+    conformance.assert_conforms(page)
+    items = page.json()["items"]
+    assert page.json()["total"] == 10
+    assert [i["row_number"] for i in items] == sorted(i["row_number"] for i in items)  # row order
+    seven = [i for i in items if i["row_number"] == 7]
+    assert [i["rule"] for i in seven] == [
+        "type_cast",
+        "regex",
+    ]  # several entries for one row, kept in insertion order
+    first = items[0]
+    assert (first["row_number"], first["column"], first["rule"]) == (3, None, "parse_error")
+    nullval = next(i for i in items if i["rule"] == "not_null")
+    assert nullval["value"] is None
+    p2 = client.get(f"{contract.prefix}{RUNS}/{done}/rejections", params={"limit": 4, "offset": 4})
+    conformance.assert_conforms(p2)
+    assert p2.json()["limit"] == 4 and p2.json()["offset"] == 4 and p2.json()["total"] == 10
+    assert [i["row_number"] for i in p2.json()["items"]] == [i["row_number"] for i in items[4:8]]
+    beyond = client.get(f"{contract.prefix}{RUNS}/{done}/rejections", params={"offset": 50})
+    conformance.assert_conforms(beyond)
+    assert beyond.json()["items"] == [] and beyond.json()["total"] == 10
+    for bad in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        e = client.get(f"{contract.prefix}{RUNS}/{done}/rejections", params=bad)
+        conformance.assert_conforms(e)
+        assert e.status_code == 422, bad
+    missing = client.get(f"{contract.prefix}{RUNS}/{uuid.uuid4()}/rejections")
+    conformance.assert_conforms(missing)
+    assert missing.status_code == 404
+    conformance.assert_error_body(
+        client.get(f"{contract.prefix}{RUNS}/not-a-uuid/rejections"), 422, "validation_error"
+    )
