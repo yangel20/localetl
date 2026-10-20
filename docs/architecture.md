@@ -182,7 +182,8 @@ class RunResult:                   # row counters: see "Row outcome accounting" 
     stage_durations_ms: dict[Stage, int]
 
 # Errors
-class EtlError(Exception): ...
+class EtlError(Exception):
+    rejected_sample: list[RejectedRow]       # default []; set by run_pipeline before re-raising: first 1,000 entries of completed chunks only (decision Q11-c)
 class CsvFormatError(EtlError): ...          # file-level (Q4): empty, header-only, undecodable, > 500 columns, duplicate headers, unrecoverable structure
 class ConfigValidationError(EtlError):
     errors: list[ConfigErrorItem]
@@ -210,8 +211,9 @@ def run_pipeline(config: PipelineConfig,
 ### Behaviour contract
 - `inspect_csv` / `preview_csv` raise `CsvFormatError` for the file-level cases in REQ-04 and "CSV structure and malformed input" below. `inspect_csv` reads the whole file in one streaming pass (`row_count` needs it), so file-level faults anywhere in the file are found at upload. Type inference uses the same parsers as casting. When `has_header` is false, columns are named `column_1`, `column_2`, …
 - `validate_pipeline_config` validates against `contracts/pipeline.schema.json`, loaded from `Path(__file__).resolve().parents[3] / "contracts" / "pipeline.schema.json"` (override: `LOCALETL_PIPELINE_SCHEMA_PATH`, read by the caller and passed in only if needed). Then it applies the semantic rules in section 6. All problems are collected into one `ConfigValidationError`.
-- `run_pipeline` re-validates the config, then runs the stages in order, calling `on_event` with `started` and `completed`/`failed` for each stage (and `progress` per chunk). It checks `should_stop()` between chunks and stages and raises `RunInterrupted` (staging dropped, nothing published).
-- On any exception, the staging table is dropped and the published table is untouched.
+- `run_pipeline` re-validates the config, then runs the stages in order, calling `on_event` with `started` and `completed`/`failed` for each stage (and `progress` per chunk). It checks `should_stop()` between chunks and stages and raises `RunInterrupted` (staging dropped, nothing published). An interruption is reported as a `failed` `StageEvent` for the current stage with message `interrupted`, then `RunInterrupted` is raised; `EventStatus` has no interrupted value, and the run's own status is set to `interrupted` by the worker (decision Q11-b).
+- **Events per chunk (Q11-b).** After each chunk has completed every stage, including load, `run_pipeline` emits one `progress` event per stage in order (extract, transform, validate, load), all carrying the same post-chunk cumulative counters. A chunk that does not complete emits no `progress` event.
+- On any exception, the staging table is dropped and the published table is untouched. The raised `EtlError` carries `rejected_sample`: the first 1,000 rejection entries of the completed chunks, in row order, so the worker can persist them for failed and interrupted runs (§7.2; decision Q11-c).
 - `run_pipeline` never writes to `public.*`. Persisting events, rejections, run counters and the `datasets` registry row is the worker's job.
 
 ### Row outcome accounting (decision Q3, approved 2026-10-19)
@@ -376,7 +378,7 @@ Decisions (user, 2026-10-20):
 
 1. **Nulls (Q7-1).** A null fails only the nullability rules: `nullable: false` (a `not_null` rejection at the cast step) and the `not_null` validation rule. `unique`, `range`, `allowed_values`, `regex` and `length` skip nulls. A `unique` key with **any** null component is not registered and never counts as a duplicate.
 2. **Composite `unique` failures (Q7-2).** A `unique` rule with more than one column produces `RejectedRow(column=null, rule="unique")`. Its `message` names the key columns. Its `value` is the key as a compact JSON array in the rule's column order, with JSON-native values (strings quoted, numbers, `true`/`false`, dates and datetimes as ISO strings), e.g. `["a@x.com","2026-10-20"]`, truncated to 500 characters. A single-column `unique` failure sets `column` to that column and `value` to the value as text, like the other rules. Documented on the contract's `RejectedRow.value`.
-3. **`fail_run` timing and checkpoints (Q7-3).** The step that finds the first rejection of a chunk evaluates the whole chunk, then raises `RejectionLimitExceeded` naming that chunk's first rejected row (row number and rule). Counters, events and rejections are persisted only for **completed chunks** (checkpoints). The failing chunk is never reported as durably completed, and the last `StageEvent` before the failure carries the counters of the completed chunks (Q3 rule 7). This applies to every rejection kind (Q4-b).
+3. **`fail_run` timing and checkpoints (Q7-3).** The step that finds the first rejection of a chunk evaluates the whole chunk, then raises `RejectionLimitExceeded` naming that chunk's first rejected row (row number and rule). Counters, events and rejections are persisted only for **completed chunks** (checkpoints). The failing chunk is never reported as durably completed, and the last `StageEvent` before the failure carries the counters of the completed chunks (Q3 rule 7). This applies to every rejection kind (Q4-b). When rejections of several kinds occur in the same chunk, the **earliest stage in pipeline order** raises (extract `parse_error` → transform `type_cast`/`not_null` → validate rules); later stages do not run for that chunk (decision Q11-a, consistent with first removal wins).
 4. **`regex` and `length` on non-string columns (Q7-4).** §6 rule 3 rejects such configs. If the engine nevertheless meets one at run time, it raises `EtlError` (an internal error). It never converts values with `str()`.
 
 ## 6. Pipeline config semantic rules (beyond JSON Schema)
