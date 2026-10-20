@@ -12,10 +12,8 @@ All problems end up in one :class:`ConfigValidationError`.
 from __future__ import annotations
 
 import copy
-import math
 import re
 from collections.abc import Iterator, Mapping
-from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -23,6 +21,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
+from .casting import CastError, cast_config_value, format_error
 from .errors import ConfigValidationError
 from .types import ConfigErrorItem, PipelineConfig
 
@@ -30,8 +29,6 @@ _SCHEMA_PATH = Path(__file__).resolve().parents[3] / "contracts" / "pipeline.sch
 
 _STRING_ONLY_TRANSFORMS = frozenset({"trim_whitespace", "change_case"})
 _STRING_ONLY_VALIDATIONS = frozenset({"regex", "length"})
-_BOOL_WORDS = frozenset({"true", "false", "1", "0", "yes", "no"})
-_INT_RE = re.compile(r"[+-]?\d+")
 
 _Path = tuple[str | int, ...]
 
@@ -141,25 +138,29 @@ def _semantic_errors(
 
     # Rule 1: unique names and sources.
     types: dict[str, str] = {}
-    formats: dict[str, str | None] = {}
     seen_sources: set[str] = set()
     for i, col in enumerate(columns):
         if col["name"] in types:
             add(("columns", i, "name"), f"duplicate column name '{col['name']}'")
         else:
             types[col["name"]] = col["type"]
-            formats[col["name"]] = col.get("format")
         if col["source"] in seen_sources:
             add(("columns", i, "source"), f"duplicate source column '{col['source']}'")
         seen_sources.add(col["source"])
 
-    # Rule 7: format only on date/datetime columns.
+    # Rule 7: format only on date/datetime columns, without time/zone directives (C-e).
     for i, col in enumerate(columns):
-        if "format" in col and col["type"] not in ("date", "datetime"):
+        if "format" not in col:
+            continue
+        if col["type"] not in ("date", "datetime"):
             add(
                 ("columns", i, "format"),
                 f"format is allowed only on date/datetime columns, not {col['type']}",
             )
+        else:
+            problem = format_error(col["type"], col["format"])
+            if problem is not None:
+                add(("columns", i, "format"), problem)
 
     # Rule 2: references, collected as (path, name, owner kind, owner item).
     refs: list[tuple[_Path, str]] = []
@@ -197,7 +198,7 @@ def _semantic_errors(
         elif op == "fill_null":
             name = item["column"]
             t = type_of(name)
-            if t is not None and not _castable(item["value"], t, formats[name]):
+            if t is not None and not _castable(item["value"], t):
                 add(
                     ("transformations", i, "value"),
                     f"value {item['value']!r} cannot be cast to {t} column '{name}'",
@@ -219,7 +220,7 @@ def _semantic_errors(
                 add(("validations", i, "pattern"), f"pattern does not compile: {exc}")
         elif rule == "allowed_values" and t is not None and name is not None:
             for j, value in enumerate(item["values"]):
-                if not _castable(value, t, formats[name]):
+                if not _castable(value, t):
                     add(
                         ("validations", i, "values", j),
                         f"value {value!r} cannot be cast to {t} column '{name}'",
@@ -252,83 +253,32 @@ def _check_range(item: dict[str, Any], i: int, t: str, add: Any) -> None:
             f"range applies only to integer, float, date and datetime columns; '{name}' is {t}",
         )
         return
+    numeric = t in ("integer", "float")
     parsed: dict[str, Any] = {}
     for bound in ("min", "max"):
         if bound not in item:
             continue
         value = item[bound]
-        if t in ("integer", "float"):
-            if isinstance(value, str) or isinstance(value, bool) or not math.isfinite(value):
-                add(
-                    ("validations", i, bound),
-                    f"{bound} must be a finite number for {t} column '{name}'",
-                )
-                continue
-            parsed[bound] = value
-        else:
-            parsed_value = _parse_iso(value, t) if isinstance(value, str) else None
-            if parsed_value is None:
-                kind = "ISO 8601 date (YYYY-MM-DD)" if t == "date" else "ISO 8601 datetime"
-                add(
-                    ("validations", i, bound),
-                    f"{bound} must be an {kind} string for {t} column '{name}'",
-                )
-                continue
-            parsed[bound] = parsed_value
-    if len(parsed) == 2:
+        # Numbers for number columns, ISO strings for date columns (section 6 rule 4).
+        if numeric == isinstance(value, str):
+            kind = "a number" if numeric else "an ISO 8601 string"
+            add(("validations", i, bound), f"{bound} must be {kind} for {t} column '{name}'")
+            continue
         try:
-            if parsed["min"] > parsed["max"]:
-                add(("validations", i), "min must be less than or equal to max")
-        except TypeError:
+            parsed[bound] = cast_config_value(value, t)
+        except CastError as exc:
             add(
-                ("validations", i),
-                "min and max are not comparable (mixed timezone-aware and naive datetimes)",
+                ("validations", i, bound),
+                f"{bound} {value!r} is not valid for {t} column '{name}': {exc}",
             )
+    if len(parsed) == 2 and parsed["min"] > parsed["max"]:
+        add(("validations", i), "min must be less than or equal to max")
 
 
-def _parse_iso(value: str, t: str) -> date | datetime | None:
+def _castable(value: Any, t: str) -> bool:
+    """Whether a JSON scalar is a valid config value for a column of type ``t`` (section 5, B)."""
     try:
-        if t == "date":
-            return date.fromisoformat(value)
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _castable(value: Any, t: str, fmt: str | None) -> bool:
-    """Whether a JSON scalar is acceptable for a column of type ``t``."""
-    if t == "string":
-        return True
-    if t == "integer":
-        if isinstance(value, bool):
-            return False
-        if isinstance(value, int):
-            return True
-        if isinstance(value, float):
-            return value.is_integer()
-        return bool(_INT_RE.fullmatch(value.strip()))
-    if t == "float":
-        if isinstance(value, bool):
-            return False
-        if isinstance(value, (int, float)):
-            return math.isfinite(value)
-        try:
-            return math.isfinite(float(value.strip()))
-        except ValueError:
-            return False
-    if t == "boolean":
-        if isinstance(value, bool):
-            return True
-        if isinstance(value, (int, float)):
-            return value in (0, 1)
-        return value.strip().lower() in _BOOL_WORDS
-    if not isinstance(value, str):  # date / datetime
+        cast_config_value(value, t)
+    except CastError:
         return False
-    text = value.strip()
-    try:
-        if fmt is not None:
-            datetime.strptime(text, fmt)
-            return True
-        return _parse_iso(text, t) is not None
-    except ValueError:
-        return False
+    return True
