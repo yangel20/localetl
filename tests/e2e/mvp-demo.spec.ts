@@ -1,9 +1,17 @@
 import { expect, test } from '@playwright/test';
+import fs from 'node:fs';
 import path from 'node:path';
 
 // Source of truth for the numbers: tests/fixtures/expected.json (orders_clean.csv, orders_full.json).
 const CSV = path.resolve(__dirname, '../fixtures/csv/orders_clean.csv');
 const TABLE = 'e2e_orders';
+// Expected counters for orders_clean.csv + orders_full.json, read from the fixture (never hard-coded).
+const EXPECTED = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../fixtures/expected.json'), 'utf-8'),
+)['orders_clean.csv'].counters as Record<
+  'extracted_count' | 'loaded_count' | 'rejected_count' | 'duplicate_dropped_count' | 'null_dropped_count',
+  number
+>;
 
 test('MVP demo: upload -> pipeline -> run -> results, explorer and charts', async ({ page }) => {
   // 1. Upload a CSV and see its preview.
@@ -34,7 +42,7 @@ test('MVP demo: upload -> pipeline -> run -> results, explorer and charts', asyn
   await expect(page).toHaveURL(/\/runs\/[0-9a-f-]{36}$/);
   await expect(page.getByText('Succeeded', { exact: true }).first()).toBeVisible({ timeout: 60_000 });
 
-  // 4. Run results: counters reconcile (200 extracted = loaded + rejected + dropped).
+  // 4. Run results: every counter equals expected.json, and they reconcile.
   const counters = page.getByRole('region', { name: 'Row counters' });
   await expect(counters).toBeVisible();
   const value = async (label: string) =>
@@ -44,15 +52,22 @@ test('MVP demo: upload -> pipeline -> run -> results, explorer and charts', asyn
   const rejected = await value('Rejected');
   const dup = await value('Duplicates dropped');
   const nulls = await value('Null rows dropped');
-  expect(extracted).toBe(200);
-  expect(loaded).toBeGreaterThan(0);
+  expect({ extracted, loaded, rejected, dup, nulls }).toEqual({
+    extracted: EXPECTED.extracted_count,
+    loaded: EXPECTED.loaded_count,
+    rejected: EXPECTED.rejected_count,
+    dup: EXPECTED.duplicate_dropped_count,
+    nulls: EXPECTED.null_dropped_count,
+  });
   expect(extracted).toBe(loaded + rejected + dup + nulls);
 
   // 5. Dataset rows and profile charts in the explorer.
   await page.goto('/datasets');
   await page.getByRole('button', { name: new RegExp(TABLE) }).click();
   await expect(page.getByRole('region', { name: 'Rows' }).locator('tbody tr').first()).toBeVisible();
+  // The explorer's row total (list entry and the table's pager) equals the loaded counter.
   await expect(page.getByText(`${loaded.toLocaleString('en-US')} rows`).first()).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Pagination' })).toContainText(`of ${loaded}`);
   await expect(
     page.getByRole('region', { name: 'Column profiles' }).locator('.recharts-wrapper > svg.recharts-surface').first(),
   ).toBeVisible();
