@@ -78,7 +78,9 @@ scripts/setup.sh
 database volume, `.env`, the data directory or `.claude/worktrees`.
 
 - Another Node major than 22: install Node 22, or run `LOCALETL_ALLOW_ANY_NODE=1 scripts/setup.sh` at your
-  own risk.
+  own risk. Only `setup.sh` checks the Node version; the other scripts need no override.
+- Changing the database port means editing three values in `.env` together: `POSTGRES_PORT` and the port
+  inside `DATABASE_URL` and `TEST_DATABASE_URL`.
 - Choose the Python used to create the virtualenv with `PYTHON_BIN=python3.12 scripts/setup.sh`.
 
 ## Configuration
@@ -182,6 +184,7 @@ run it → watch it succeed → results, dataset explorer and charts. The video 
 | `the dev stack is already running` | Use the running stack, or `scripts/stop.sh` first |
 | `backend/.venv not found` / `node_modules not found` | `scripts/setup.sh` |
 | `Node 22 is required` | Install Node 22 (or `LOCALETL_ALLOW_ANY_NODE=1`, unsupported) |
+| Running a second LocalETL stack beside an existing one (another clone) | Use another Compose project and port: `export COMPOSE_PROJECT_NAME=localetl-2` in the shell (`dev.sh` ignores keys not in `.env.example`), and a free port such as 55433 in the three `.env` values. Otherwise the container and volume names collide with the first stack. Ports 8000 and 5173 are fixed, so only one stack can run `dev.sh` at a time |
 | Database container recreated on start | Happens when `dev.sh`/`docker compose` runs from a different checkout or git worktree than the one that created it; data is kept, but connections drop briefly. Run from the main checkout |
 | Changed `POSTGRES_*` or `scripts/db/init.sql` has no effect | They apply only when the volume is first created; resetting needs `docker compose down -v`, which **deletes all data** |
 | Test DB errors about permissions | The role must be allowed to create databases (the Compose role is) |
