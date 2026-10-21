@@ -5,7 +5,7 @@ Updated 2026-10-20 (session end) by the orchestrator. Read this first; `docs/tas
 ## State
 - **Wave 1 complete**: all tickets Done, `scripts/test-all.sh` 16/16 on `main`, QA-07 PASS, no open contract proposals. Last merge: Q12-1 contract + FE-02s (`043bb8a`). `main` = `git log -1`.
 - **Wave 2 complete** (2026-10-21): all tickets Done incl. QA-08 MVP E2E demo (passed by QA and independently by the orchestrator; recording under `tests/e2e/test-results/`, gitignored). Next: deferred hardening track (needs user go-ahead) and small follow-ups (VIZ-02 unmount flash and error-state tests; Recharts bundle size; `WorkerConfig` → `app.core.settings`; first GitHub run of `e2e.yml`). Run E2E: `npm --prefix tests/e2e ci && npm --prefix tests/e2e run install:browser && PYTHON=$PWD/backend/.venv/bin/python scripts/e2e.sh`.
-- **Follow-ups** (2026-10-21): VIZ-03, QA-08b, VIZ-04 merged (VIZ-04 at `9e381bd`). FE-T1 phase 1 done; implementation awaits user approval. On hold by user: hardening draft v2, QA-08d, GitHub setup (QA-08c). Frontend suite can flake under heavy machine load (pre-existing; FE-T1).
+- **Follow-ups** (2026-10-21): VIZ-03, QA-08b, VIZ-04 merged (VIZ-04 at `9e381bd`). FE-T1 merged (base 9/10 vs 10/10 green under heavy load; no timeout change). On hold by user: hardening draft v2, QA-08d, GitHub setup (QA-08c). DatasetExplorer full-mount tests remain closest to the 5 s limit under extreme load.
 - Shared Postgres: compose project `localetl`, container `localetl-db-1`; as of 2026-10-21 published on `127.0.0.1:5432` (was 55432; check `docker port localetl-db-1`).
 
 ## Approvals and deferrals (2026-10-20, user)
