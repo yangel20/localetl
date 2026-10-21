@@ -6,8 +6,8 @@ Wave 1 ships the API and the ETL engine; the worker is Wave 2. So the end-to-end
    (``queued``; a second run is 409);
 2. through the engine: ``run_pipeline`` on the *same* stored file, options and config snapshot the
    API produced, with ``replace`` and ``append``;
-3. what the worker will persist is written to the database by ``worker_finish`` below (a stand-in
-   that WK-02 replaces), and the result is read back through ``/runs``, ``/datasets``, ``/rows``,
+3. the real worker code (claim + ``execute_run``, WK-02) executes the queued runs, and the result is
+   read back through ``/runs``, ``/datasets``, ``/rows``,
    ``/profile`` and ``/metrics``.
 
 Expected numbers come from ``tests/fixtures/expected.json``, never from the code under test.
@@ -36,6 +36,7 @@ from app.etl import (
     run_pipeline,
     validate_pipeline_config,
 )
+from app.services.runs import claim_next_run, execute_run
 
 if TYPE_CHECKING:  # fixtures live in conftest.py (no package: no relative import)
     from conftest import Conformance, Contract
@@ -176,86 +177,12 @@ def queued_snapshot(engine: sa.Engine, run_id: str) -> dict[str, Any]:
     return dict(snap)
 
 
-def worker_finish(
-    engine: sa.Engine, run_id: str, result: RunResult, events: list[StageEvent]
-) -> None:
-    """Stand-in for the worker's success transaction (architecture 7.2); WK-02 replaces it."""
-    published = result.published
-    with engine.begin() as conn:
-        conn.execute(
-            sa.text(
-                "UPDATE runs SET status = 'running', started_at = now() - interval '2 seconds',"
-                " heartbeat_at = now(), worker_id = 'qa' WHERE id = :id"
-            ),
-            {"id": run_id},
-        )
-        for e in events:
-            conn.execute(
-                sa.text(
-                    "INSERT INTO run_events"
-                    " (run_id, stage, status, rows_in, rows_out, message, created_at)"
-                    " VALUES (:r, :s, :st, :ri, :ro, :m, :at)"
-                ),
-                {
-                    "r": run_id,
-                    "s": e.stage,
-                    "st": e.status,
-                    "ri": e.rows_in,
-                    "ro": e.rows_out,
-                    "m": e.message,
-                    "at": e.at,
-                },
-            )
-        pipeline_id = conn.execute(
-            sa.text("SELECT pipeline_id FROM runs WHERE id = :id"), {"id": run_id}
-        ).scalar_one()
-        dataset_id = conn.execute(
-            sa.text(
-                "INSERT INTO datasets (table_name, pipeline_id, last_run_id, row_count, columns)"
-                " VALUES (:t, :p, :r, :n, CAST(:c AS jsonb))"
-                " ON CONFLICT (table_name) DO UPDATE SET last_run_id = :r, row_count = :n,"
-                " columns = CAST(:c AS jsonb), published_at = now() RETURNING id"
-            ),
-            {
-                "t": published.table,
-                "p": pipeline_id,
-                "r": run_id,
-                "n": published.row_count,
-                "c": json.dumps([{"name": n, "type": t} for n, t in published.columns]),
-            },
-        ).scalar_one()
-        conn.execute(
-            sa.text(
-                "UPDATE runs SET status = 'succeeded', finished_at = now(), dataset_id = :d,"
-                " extracted_count = :e, loaded_count = :l, rejected_count = :r,"
-                " duplicate_dropped_count = :dd, null_dropped_count = :nd WHERE id = :id"
-            ),
-            {
-                "id": run_id,
-                "d": dataset_id,
-                "e": result.extracted_count,
-                "l": result.loaded_count,
-                "r": result.rejected_count,
-                "dd": result.duplicate_dropped_count,
-                "nd": result.null_dropped_count,
-            },
-        )
-        for r in result.rejected_sample:
-            conn.execute(
-                sa.text(
-                    "INSERT INTO run_rejections"
-                    " (run_id, row_number, column_name, rule, message, value)"
-                    " VALUES (:r, :n, :c, :rule, :m, :v)"
-                ),
-                {
-                    "r": run_id,
-                    "n": r.row_number,
-                    "c": r.column,
-                    "rule": r.rule,
-                    "m": r.message,
-                    "v": r.value,
-                },
-            )
+def worker_run(engine: sa.Engine, data_dir: Path, run_id: str, chunk_rows: int = 50_000) -> None:
+    """Claim the queued run and execute it with the real worker code (WK-02)."""
+    wid = "qa-worker"
+    claimed = claim_next_run(engine, wid)
+    assert claimed == uuid.UUID(run_id)
+    execute_run(engine, claimed, wid, data_dir=data_dir, chunk_rows=chunk_rows)
 
 
 def engine_run(
@@ -310,7 +237,8 @@ def test_wave1_flow_upload_to_dataset_and_metrics(
     conformance.assert_conforms(validated)
     assert validated.json() == {"valid": True, "errors": []}
     created = client.post(
-        f"{api}/pipelines", json={"name": "orders", "source_id": source["id"], "config": config}
+        f"{api}/pipelines",
+        json={"name": "orders", "source_id": source["id"], "config": config},
     )
     conformance.assert_conforms(created)
     assert created.status_code == 201
@@ -323,19 +251,15 @@ def test_wave1_flow_upload_to_dataset_and_metrics(
     second = client.post(f"{api}/pipelines/{pipeline_id}/runs")
     conformance.assert_conforms(second)
     assert second.status_code == 409
-    # --- engine: the same stored file, options and snapshot
+    # --- worker: the real claim + executor runs the queued run
     csv_path, options = stored_source(fresh, data_dir, source["id"])
-    snapshot = queued_snapshot(fresh, run_id)
-    assert snapshot == config
-    result, events, rid = engine_run(fresh, snapshot, csv_path, options, run_id=uuid.UUID(run_id))
+    assert queued_snapshot(fresh, run_id) == config
+    rid = uuid.UUID(run_id)
+    worker_run(fresh, data_dir, run_id)
     expected = counters_of(EXPECTED["orders_clean.csv"]["counters"])
-    assert result_counters(result) == expected and reconciles(expected)
-    assert (
-        table_count(fresh, "orders") == result.loaded_count == 200
-    )  # replace: exactly this run's rows
-    assert table_count(fresh, "orders", rid) == result.loaded_count
-    assert result.published.row_count == 200
-    worker_finish(fresh, run_id, result, events)
+    assert reconciles(expected)
+    assert table_count(fresh, "orders") == 200  # replace: exactly this run's rows
+    assert table_count(fresh, "orders", rid) == 200
     # --- API: read everything back
     run = client.get(f"{api}/runs/{run_id}")
     conformance.assert_conforms(run)
@@ -345,7 +269,10 @@ def test_wave1_flow_upload_to_dataset_and_metrics(
     assert run.json()["duration_ms"] is not None and run.json()["dataset_id"]
     evs = client.get(f"{api}/runs/{run_id}/events")
     conformance.assert_conforms(evs)
-    assert [(e["stage"], e["status"]) for e in evs.json()][-1] == ("publish", "completed")
+    assert [(e["stage"], e["status"]) for e in evs.json()][-1] == (
+        "publish",
+        "completed",
+    )
     listing = client.get(f"{api}/datasets")
     conformance.assert_conforms(listing)
     assert listing.json()["total"] == 1 and listing.json()["items"][0]["table_name"] == "orders"
@@ -428,7 +355,11 @@ def test_scenario_list_is_complete() -> None:
     ids=[f"{n}:{Path(c).name}" for n, c, _ in SCENARIOS],
 )
 def test_engine_counters_match_expected_json(
-    fresh: sa.Engine, csv_name: str, config_path: str, expected: tuple[int, ...], chunk_rows: int
+    fresh: sa.Engine,
+    csv_name: str,
+    config_path: str,
+    expected: tuple[int, ...],
+    chunk_rows: int,
 ) -> None:
     config = load_config(config_path)
     result, events, rid = engine_run(fresh, config, CSV / csv_name, chunk_rows=chunk_rows)
@@ -460,7 +391,11 @@ def seed_published(engine: sa.Engine) -> tuple[int, str]:
     ("csv_name", "config_path", "error"),
     [
         ("orders_dirty.csv", ORDERS_FULL, RejectionLimitExceeded),  # 23/96 > ratio 0.1
-        ("orders_dirty.csv", FX / "pipelines/orders_dirty_failrun.json", RejectionLimitExceeded),
+        (
+            "orders_dirty.csv",
+            FX / "pipelines/orders_dirty_failrun.json",
+            RejectionLimitExceeded,
+        ),
     ],
 )
 def test_failing_pipeline_publishes_nothing(
@@ -501,7 +436,9 @@ def test_append_schema_mismatch_publishes_nothing(fresh: sa.Engine) -> None:
     assert fingerprint(fresh, "orders") == before and staging_tables(fresh) == []
 
 
-def test_interruption_at_every_boundary_drops_staging_and_changes_nothing(fresh: sa.Engine) -> None:
+def test_interruption_at_every_boundary_drops_staging_and_changes_nothing(
+    fresh: sa.Engine,
+) -> None:
     before = seed_published(fresh)
     config = load_config(
         FX / "pipelines/orders_append.json"
@@ -574,33 +511,29 @@ def test_q4_ragged_fixture_runs_succeeded_with_parse_errors_as_expected(
     assert preview.json()["sampled_rows"] == structure["well_formed_count"]  # but not previewed
     config = load_config("pipelines/ragged_reject.json")
     pipeline = client.post(
-        f"{api}/pipelines", json={"name": "ragged", "source_id": source["id"], "config": config}
+        f"{api}/pipelines",
+        json={"name": "ragged", "source_id": source["id"], "config": config},
     )
     conformance.assert_conforms(pipeline)
     assert pipeline.status_code == 201
     run = client.post(f"{api}/pipelines/{pipeline.json()['id']}/runs")
     conformance.assert_conforms(run)
     run_id = run.json()["id"]
-    csv_path, options = stored_source(fresh, data_dir, source["id"])
-    result, events, rid = engine_run(
-        fresh,
-        queued_snapshot(fresh, run_id),
-        csv_path,
-        options,
-        chunk_rows=2,
-        run_id=uuid.UUID(run_id),
-    )
+    worker_run(fresh, data_dir, run_id, chunk_rows=2)
+    done = client.get(f"{api}/runs/{run_id}")
+    conformance.assert_conforms(done)
     want = counters_of(EXPECTED["ragged_rows.csv"]["counters"])
-    assert result_counters(result) == want and reconciles(want)
-    got = [(r.row_number, r.rule, r.column, r.message, r.value) for r in result.rejected_sample]
+    assert reconciles(want) and tuple(done.json()[k] for k in COUNTERS) == want
+    rej_all = client.get(f"{api}/runs/{run_id}/rejections", params={"limit": 200})
+    got = [
+        (i["row_number"], i["rule"], i["column"], i["message"], i["value"])
+        for i in rej_all.json()["items"]
+    ]
     exp = [
         (e["row_number"], e["rule"], e["column"], e["message"], e["value"])
         for e in structure["parse_errors"]
     ]
-    assert (
-        got == exp
-    )  # row numbers, parse_error, column null, message and value as in expected.json
-    worker_finish(fresh, run_id, result, events)
+    assert sorted(got) == sorted(exp)  # row numbers, parse_error, column null, message and value
     rej = client.get(f"{api}/runs/{run_id}/rejections")
     conformance.assert_conforms(rej)
     assert (
@@ -612,10 +545,16 @@ def test_q4_ragged_fixture_runs_succeeded_with_parse_errors_as_expected(
     assert done.json()["status"] == "succeeded" and done.json()["rejected_count"] == 3
     rows = client.get(f"{api}/datasets/{done.json()['dataset_id']}/rows")
     conformance.assert_conforms(rows)
-    assert rows.json()["total"] == 3 and [r["id"] for r in rows.json()["items"]] == [1, 4, 6]
+    assert rows.json()["total"] == 3 and [r["id"] for r in rows.json()["items"]] == [
+        1,
+        4,
+        6,
+    ]
 
 
-def test_q4_fail_run_on_the_first_parse_error_publishes_nothing(fresh: sa.Engine) -> None:
+def test_q4_fail_run_on_the_first_parse_error_publishes_nothing(
+    fresh: sa.Engine,
+) -> None:
     scenario = EXPECTED["ragged_rows.csv"]["scenarios"]["pipelines/ragged_failrun.json"]
     config = load_config("pipelines/ragged_failrun.json")
     for chunk_rows, at_failure in scenario["counters_at_failure_by_chunk_rows"].items():
@@ -637,7 +576,9 @@ def test_q4_fail_run_on_the_first_parse_error_publishes_nothing(fresh: sa.Engine
         assert not table_exists(fresh, "ragged") and staging_tables(fresh) == []
 
 
-def test_q4_file_level_faults_fail_at_extract_and_publish_nothing(fresh: sa.Engine) -> None:
+def test_q4_file_level_faults_fail_at_extract_and_publish_nothing(
+    fresh: sa.Engine,
+) -> None:
     config = load_config("pipelines/ragged_reject.json")
     for name in (
         "duplicate_headers.csv",
