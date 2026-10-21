@@ -36,7 +36,9 @@ def engine(test_database_url: str) -> Iterator[sa.Engine]:
 @pytest.fixture
 def clean_runs(engine: sa.Engine) -> Iterator[None]:
     with engine.begin() as conn:
+        conn.execute(sa.text("DELETE FROM datasets"))
         conn.execute(sa.text("DELETE FROM runs"))
+        conn.execute(sa.text("DELETE FROM data_sources"))
     yield
 
 
