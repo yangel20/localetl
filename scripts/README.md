@@ -23,7 +23,7 @@ docker compose down -v        # stop and DELETE the volume (full reset)
 - PostgreSQL 16 on `127.0.0.1:5432` only (not exposed to the network). If a local Postgres already uses 5432, set `POSTGRES_PORT=55432` (compose-only override) and point `DATABASE_URL`/`TEST_DATABASE_URL` at that port.
 - Databases: `localetl` (from `POSTGRES_DB`) and `localetl_test` (from `init.sql`).
 - User/password come from `POSTGRES_USER` / `POSTGRES_PASSWORD`.
-- Data lives in the named volume `localetl_pgdata`.
+- Data lives in the named volume `localetl_localetl_pgdata` (Compose prefixes the project name).
 - `init.sql` runs **only on first initialisation of an empty volume**. If you
   changed it or the credentials, run `docker compose down -v` and start again.
 - `localetl_test` is for pytest (`TEST_DATABASE_URL`) and may be wiped by tests.

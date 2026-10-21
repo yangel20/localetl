@@ -30,3 +30,6 @@ test-results/
 
 # OS
 .DS_Store
+
+# Dev launcher state (scripts/dev.sh PID file and logs)
+.localetl/
