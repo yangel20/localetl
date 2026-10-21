@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop the processes started by scripts/dev.sh. Only PIDs listed in the PID file (.localetl/dev.pids)
 # are signalled, and each one is verified first: alive, owned by you, and its command line still
-# matches what dev.sh recorded. SIGTERM, a wait, then SIGKILL only for verified survivors.
+# matches what dev.sh recorded, and its start time is unchanged (PID reuse). SIGTERM, a wait, then SIGKILL only for verified survivors.
 # No pkill/killall, no name matching. The database is left running unless --db is given
 # (`docker compose stop db`; the data volume is kept). Nothing here deletes data, volumes or .env.
 #
@@ -30,22 +30,22 @@ else
   while IFS= read -r line || [ -n "$line" ]; do [ -n "$line" ] && RECORDS+=("$line"); done <"$PID_FILE"
 
   signal_verified() { # signal_verified SIG ROLE-FILTER...: signal every record that still verifies
-    local sig="$1" line pid role fragment
+    local sig="$1" line pid role fragment start
     for line in "${RECORDS[@]}"; do
-      IFS=$'\t' read -r pid role fragment <<<"$line"
-      if verify_pid "$pid" "$fragment"; then
+      IFS=$'\t' read -r pid role fragment start <<<"$line"
+      if verify_pid "$pid" "$fragment" "${start:-}"; then
         say "  $sig $role (pid $pid)"
         kill -"$sig" "$pid" 2>/dev/null || true
       else
-        say "  skip $role (pid ${pid:-?}): already stopped (or not yours, or command changed)"
+        say "  skip $role (pid ${pid:-?}): not signalled: already stopped, not yours, or command/start time changed"
       fi
     done
   }
   any_alive() {
-    local line pid role fragment
+    local line pid role fragment start
     for line in "${RECORDS[@]}"; do
-      IFS=$'\t' read -r pid role fragment <<<"$line"
-      if verify_pid "$pid" "$fragment"; then return 0; fi
+      IFS=$'\t' read -r pid role fragment start <<<"$line"
+      if verify_pid "$pid" "$fragment" "${start:-}"; then return 0; fi
     done
     return 1
   }
@@ -56,12 +56,12 @@ else
     # The launcher (dev.sh) shuts the children down in order and checks the worker's exit code, so give
     # it the first and only SIGTERM and let it finish; only then deal with whatever is left.
     for line in "${RECORDS[@]}"; do
-      IFS=$'\t' read -r pid role fragment <<<"$line"
-      if [ "$role" = "launcher" ] && verify_pid "$pid" "$fragment"; then
+      IFS=$'\t' read -r pid role fragment start <<<"$line"
+      if [ "$role" = "launcher" ] && verify_pid "$pid" "$fragment" "${start:-}"; then
         say "Stopping the launcher (pid $pid, SIGTERM) and waiting for it to stop its children..."
         kill -TERM "$pid" 2>/dev/null || true
         end=$((SECONDS + TIMEOUT))
-        while verify_pid "$pid" "$fragment" && (( SECONDS < end )); do sleep 0.5; done
+        while verify_pid "$pid" "$fragment" "${start:-}" && (( SECONDS < end )); do sleep 0.5; done
       fi
     done
     say "Stopping any remaining recorded processes (SIGTERM)..."

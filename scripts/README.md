@@ -57,10 +57,11 @@ scripts/build.sh        # checks + production build
 - Configuration order: environment > `.env` > `.env.example`. `.env` is **parsed, never sourced**: only
   `KEY=value` lines with an upper-case name are read, one layer of matching quotes is removed, and values are
   taken literally (no `$` expansion, backticks or `$(...)`).
+- Only keys declared in `.env.example` are read from `.env`; any other key (e.g. `NODE_OPTIONS`, `BASH_ENV`, `PYTHONPATH`, `LD_PRELOAD`) is skipped with a warning that names the key, never the value.
 - Secrets are never printed: `dev.sh` shows variable names and hosts, with URL passwords masked as `***`.
 - `LOCALETL_DATA_DIR` defaults to `./data` relative to the repository root (made absolute for the API and worker).
-- PID file: `.localetl/dev.pids` (one `PID<TAB>role<TAB>command-fragment` line per process); logs in `.localetl/logs/`.
-  `stop.sh` verifies each PID (alive, yours, command line still matches) before signalling; it never uses `pkill`/`killall`
+- PID file: `.localetl/dev.pids` (one `PID<TAB>role<TAB>command-fragment<TAB>start-time` line per process; a line without a start time is never signalled); logs in `.localetl/logs/`.
+  `stop.sh` verifies each PID (alive, yours, command line still matches and the process start time is unchanged, so a recycled PID is never signalled) before signalling; it never uses `pkill`/`killall`
   and never deletes volumes, data or `.env`.
 - `dev.sh` refuses to start if recorded processes are alive or ports 8000/5173 are in use.
 - `frontend/dist/` is static assets. `vite dev` and `vite preview` are not deployments.
