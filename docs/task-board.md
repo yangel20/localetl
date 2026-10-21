@@ -145,40 +145,30 @@ Deferred (user, 2026-10-20) until Wave 2 core and QA are complete: hardening tra
 
 | ID | Title | Owner | Files | Acceptance criteria | Status |
 |---|---|---|---|---|---|
-| VIZ-03 | Explorer polish | visualization-engineer | `frontend/src/features/explorer/**` | Rows table stays mounted during page/sort reload (no flash, focus kept); tests for datasets-list and profile error states; focus test | Submitted: `viz/VIZ-03-explorer-polish` @ `2433c41` (on `c7d7d71`); in QA review |
+| VIZ-03 | Explorer polish | visualization-engineer | `frontend/src/features/explorer/**` | Rows table stays mounted during page/sort reload (no flash, focus kept); tests for datasets-list and profile error states; focus test | **Done**: merged (code `2433c41`; QA PASS `6b9f6e4`; test-all 16/16; E2E 1/1). QA accepts last-page focus loss vs AC; accessibility ruling requested (possible VIZ-04) |
 | QA-08b | E2E counters from fixture | qa-engineer | `tests/e2e/**` | All five run counters asserted against `tests/fixtures/expected.json`; explorer total = loaded | **Done**: merged (code `2e9cd0a`; orchestrator review PASS; test-all 16/16; E2E 1/1). Limitation: UI builds its own default pipeline, not `orders_full.json`, so counters match only because both load all 200 rows |
 | QA-08c | First GitHub run of `e2e.yml` | qa-engineer | `.github/workflows/e2e.yml` | Workflow green on GitHub | **Blocked**: repo has no git remote; pushing needs user approval |
+| QA-08d | E2E with the full `orders_full.json` pipeline | qa-engineer | `tests/e2e/**` | **PROPOSED, not approved**: create the pipeline from `tests/fixtures/pipelines/orders_full.json` (via API in the spec, or built in the UI), run on `orders_dirty.csv`/`orders_clean.csv` per `expected.json`; assert all five counters, rejections (row, rule, column), published table columns/types and row count, explorer total, profile | Proposed |
 
-## Hardening track (DRAFT 2026-10-21, pending user approval)
+## Hardening track (DRAFT v2 2026-10-21, pending user approval; not started)
 
-Orchestrator recommendations. "Document" = confirm current behavior in architecture §6 (orchestrator, no code). "Fix" items become tickets after approval; items marked (env) would add an environment variable to `.env.example` (shared, needs approval).
+Priorities: **P1** data integrity and worker recovery · **P2** security and supply chain · **P3** config correctness · **P4** quality. H-DOC-1 (orchestrator) goes first because it fixes the rules the fix tickets implement.
 
-| Item | Recommendation | Ticket |
-|---|---|---|
-| Q8-2 `_localetl_` column prefix | Fix: §6 rule rejecting target columns with that prefix (avoids collision with internal columns) | H-ETL-1 |
-| Q8-3 replace-mode ACCESS EXCLUSIVE lock | Document as known limitation | — |
-| Q8-4 unusable strptime formats | Fix: reject at config time | H-ETL-1 |
-| Q8-5 quoting-fault `parse_error` value = raw record | Document | — |
-| Q8-6 config ISO date strings not stripped | Fix: strip like numeric/boolean (consistency) | H-ETL-1 |
-| Q8-7 empty config strings for numeric/boolean rejected | Document (current behavior correct) | — |
-| Q8-8 string range bounds on number columns rejected | Document (§6 rule 4 stands) | — |
-| Q8-9 `0`/`1` + `yes`/`true` infer boolean | Document | — |
-| Q8-10 replace publish has no `lock_timeout` | Fix: `SET LOCAL lock_timeout` (fixed 5 s constant, no new env var) → `LoadError` | H-ETL-1 |
-| Q8-11 append compatibility order-sensitive | Document as intended | — |
-| Q8-12 faulty first record = file-level `CsvFormatError` | Document as Q4 rule 5 clarification | — |
-| Q9 (1–7) transform semantics | Document all seven as implemented | — |
-| Q10-1 dependency drift | Fix: `backend/constraints.txt` + pytest `filterwarnings` | H-QA-1 |
-| Q10-2 lint `contracts/tools` | Fix the findings (orchestrator-owned path) | H-ORCH-1 |
-| Q10-3 NUL byte fails the whole run at load | Fix: reject the row as `parse_error` | H-ETL-1 |
-| Q10-4 preview succeeds on late-fault file | Document (preview is a sample) | — |
-| Q10-5 whitespace-only header accepted | Fix: reject as `CsvFormatError` | H-ETL-1 |
-| Q12-2 stale partial uploads in `tmp/` | Fix: clean at API startup | H-BE-1 |
-| Q12-3 ETL-07 event-order notes | Document | — |
-| WK-01 QA note: `WorkerConfig` → `app.core.settings` | Fix | H-BE-1 (backend) then worker import update |
-| WK-02 QA note: crash between publish and success txn | Document as known limitation of §7.2 | — |
-| FE-06 note: Recharts chunk > 500 kB | Fix: lazy-load Home and Datasets routes | H-FE-1 |
+| ID | Pri | Owner | Depends on | Items | Acceptance criteria |
+|---|---|---|---|---|---|
+| H-DOC-1 | P1 | orchestrator | — | Architecture §6/§7.2 updates: document-only items (Q8-3, Q8-5, Q8-7, Q8-8, Q8-9, Q8-11, Q8-12, Q9 1–7, Q10-4, Q12-3); new rules for Q8-2, Q8-4, Q8-6, Q10-3, Q10-5; Q8-10 lock-timeout semantics; §7.2 recovery rule for a run that published but crashed before its success transaction | Docs merged; no contract change unless approved separately |
+| H-ETL-1 | P1 | etl-engineer | H-DOC-1 | Q10-3 NUL byte → row `parse_error` (not a failed run); Q8-2 reject target columns prefixed `_localetl_`; Q8-10 `SET LOCAL lock_timeout` (fixed 5 s) on replace publish → `LoadError`; Q10-5 whitespace-only header → `CsvFormatError` | Tests per item; engine suite + QA-03 fixtures green |
+| H-WK-1 | P1 | worker-engineer | H-DOC-1 | Recovery of a stale `running` run detects a table already published by that run (rows carry its run id) and resolves it per the H-DOC-1 rule, so registry/run state never disagree with published data | Crash-injection test between publish and success txn; two-worker race test still green |
+| H-BE-1 | P1 | backend-engineer | — | Q12-2 remove stale partial uploads in `LOCALETL_DATA_DIR/tmp/` at API startup (only that dir, only files older than a threshold) | Test with planted stale + fresh files; path confined to `tmp/` |
+| H-QA-1 | P2 | qa-engineer | — | Q10-1 `backend/constraints.txt` from a green freeze, used by CI and test-all; pytest `filterwarnings` for the known Starlette/httpx warning; `npm audit` and `pip-audit` report (report only) | CI uses constraints; audit findings listed |
+| H-QA-2 | P2 | qa-engineer | H-ETL-1, H-BE-1 | Security regression pass: upload path traversal and `stored_path` escapes, SQL identifier quoting with hostile columns, upload size limit (Q8-1), CORS origins, no secrets in logs/errors | Tests in `tests/integration/security/**`; findings → tickets |
+| H-ETL-2 | P3 | etl-engineer | H-DOC-1, H-ETL-1 | Q8-4 reject unusable strptime formats at config time; Q8-6 strip config ISO date strings like numeric/boolean | Tests; `contracts/examples` still validate |
+| H-BE-2 | P4 | backend-engineer | — | Move `WorkerConfig` to `app.core.settings` (WK-01 QA note) | mypy/tests green |
+| H-WK-2 | P4 | worker-engineer | H-BE-2, H-WK-1 | Worker imports config from `app.core.settings` | Worker tests green |
+| H-FE-1 | P4 | frontend-engineer | — | Lazy-load Home and Datasets routes so Recharts leaves the main chunk (> 500 kB warning) | Build has no chunk warning; E2E green |
+| H-ORCH-1 | P4 | orchestrator | — | Q10-2 fix the 32 lint findings in `contracts/tools` | `ruff` clean over `contracts/tools` |
 
-Proposed order (after approval): orchestrator §6 doc update first (H-ETL-1 depends on it) → H-ETL-1, H-BE-1, H-QA-1, H-FE-1 in parallel → QA review each → full suite + E2E at each merge.
+Parallel lanes after approval: H-DOC-1 + H-BE-1 + H-QA-1 + H-FE-1 + H-BE-2 start at once; then H-ETL-1 and H-WK-1; then H-QA-2, H-ETL-2, H-WK-2. Each ticket: QA review → trial merge → test-all + E2E → merge.
 
 ## Review log
 
