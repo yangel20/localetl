@@ -1,0 +1,13 @@
+{
+  "name": "localetl-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright end-to-end demo (QA-08). Run through scripts/e2e.sh, which starts the full stack.",
+  "scripts": {
+    "test": "playwright test",
+    "install:browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}
