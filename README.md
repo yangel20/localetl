@@ -132,7 +132,8 @@ copy, or when port 8000 or 5173 is already in use. Run it from the main checkout
 - from another terminal: `scripts/stop.sh`
 
 `stop.sh` signals only the processes `dev.sh` recorded in `.localetl/dev.pids`, after checking each is still
-alive, owned by you and running the recorded command. The worker finishes its current step and exits.
+alive, owned by you and running the recorded command. The worker stops claiming runs, interrupts an active
+run at the next stage or chunk boundary (that run ends `interrupted`) and exits.
 PostgreSQL keeps running; stop it too with `scripts/stop.sh --db` (`docker compose stop db`, data kept).
 Nothing in these scripts deletes the database volume or your data. A full reset is a manual, destructive
 step: `docker compose down -v` deletes the volume.
@@ -176,7 +177,7 @@ run it → watch it succeed → results, dataset explorer and charts. The video 
 
 | Symptom | Fix |
 |---|---|
-| Port 5432 already in use (e.g. Postgres.app) | Set `POSTGRES_PORT=55432` in `.env` and change the port in `DATABASE_URL` and `TEST_DATABASE_URL` to match |
+| Port 5432 already in use (e.g. Postgres.app) | For `dev.sh`: set `POSTGRES_PORT=55432` in `.env` and change the port in `DATABASE_URL` and `TEST_DATABASE_URL` to match. `test-all.sh`, `e2e.sh` and `dev-up.sh` do not read `.env`: run them as `POSTGRES_PORT=55432 scripts/test-all.sh` (they derive the database URLs from it unless `DATABASE_URL`/`TEST_DATABASE_URL` are exported) |
 | `port 8000/5173 is already in use` | Stop what uses it, or `scripts/stop.sh` if it is an earlier LocalETL run |
 | `the dev stack is already running` | Use the running stack, or `scripts/stop.sh` first |
 | `backend/.venv not found` / `node_modules not found` | `scripts/setup.sh` |
