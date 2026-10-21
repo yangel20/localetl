@@ -4,8 +4,8 @@ Updated 2026-10-20 (session end) by the orchestrator. Read this first; `docs/tas
 
 ## State
 - **Wave 1 complete**: all tickets Done, `scripts/test-all.sh` 16/16 on `main`, QA-07 PASS, no open contract proposals. Last merge: Q12-1 contract + FE-02s (`043bb8a`). `main` = `git log -1`.
-- **Wave 2 approved, not started** (board "Wave 2"). No agent is working; all worktrees clean; no stashes.
-- Shared Postgres: compose project `localetl`, container `localetl-db-1`, `127.0.0.1:55432`.
+- **Wave 2 in progress** (2026-10-21): WK-01, VIZ-01, VIZ-02 Done (test-all 16/16 at each merge). WK-02 assigned to agent-worker; FE-06 Ready (relaunch agent-frontend). QA reviews on `qa/QA-06b-wave2-reviews`.
+- Shared Postgres: compose project `localetl`, container `localetl-db-1`; as of 2026-10-21 published on `127.0.0.1:5432` (was 55432; check `docker port localetl-db-1`).
 
 ## Approvals and deferrals (2026-10-20, user)
 - Wave 2 plan approved: WK-01→WK-02→WK-03 (worker-engineer), VIZ-01, VIZ-02 (visualization-engineer), FE-06, QA-07b, QA-09, QA-08 (MVP gate).
@@ -21,9 +21,9 @@ Q1 · Q3 · Q4 (+a..d) · Q6-1 · Q6-3 (+C-a..e, `app/etl/casting.py`) · Q7 · 
 cd /Users/yangel/Desktop/localetl
 git status && git log --oneline -3 && git worktree list
 docker compose up -d --pull never db && POSTGRES_PORT=55432 scripts/dev-up.sh
-# full check (venv: python3.11 -m venv .venv && .venv/bin/pip install -e 'backend[dev]')
-PYTHON=.venv/bin/python DATABASE_URL=postgresql+psycopg://localetl:localetl@127.0.0.1:55432/localetl \
-  TEST_DATABASE_URL=postgresql+psycopg://localetl:localetl@127.0.0.1:55432/localetl_test scripts/test-all.sh
+# full check (venv is backend/.venv; PYTHON must be absolute; port per `docker port localetl-db-1`)
+PYTHON=$PWD/backend/.venv/bin/python DATABASE_URL=postgresql+psycopg://localetl:localetl@127.0.0.1:5432/localetl \
+  TEST_DATABASE_URL=postgresql+psycopg://localetl:localetl@127.0.0.1:5432/localetl_test scripts/test-all.sh
 ```
 Create the two new worktrees once (main checkout):
 ```sh
