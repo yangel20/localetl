@@ -26,3 +26,9 @@
 ## Notes (non-blocking)
 1. The Node row says "npm bundled with Node 22", consistent with setup.sh; Node 23 users need the documented override.
 2. `git clone <your-repository-url>`: the repository has no remote yet; fine as a placeholder.
+
+## Re-check (2026-10-21) — **PASS** at **27ba561**
+- Target: `orch/DX-01b-readme` @ **27ba561** (only `README.md`, +3/-2, against f008d45).
+- **F1 fixed.** The troubleshooting row now separates the two cases: `dev.sh` reads `.env` (set `POSTGRES_PORT=55432` and the ports in `DATABASE_URL`/`TEST_DATABASE_URL` there); `test-all.sh`, `e2e.sh` and `dev-up.sh` are run as `POSTGRES_PORT=55432 scripts/test-all.sh`, and they derive the database URLs from it unless `DATABASE_URL`/`TEST_DATABASE_URL` are exported. Matches `test-all.sh` lines 29–31 and `e2e.sh` lines 20–21 (`PORT="${POSTGRES_PORT:-5432}"`).
+- **F2 fixed.** The Stop section now says the worker stops claiming runs, interrupts an active run at the next stage or chunk boundary (that run ends `interrupted`) and exits, consistent with REQ-44 and the WK-03 signal tests.
+- Nit (non-blocking): "`dev-up.sh` does not read `.env`" is true of the script, but `docker compose` itself reads a project-root `.env`, so a `POSTGRES_PORT` in `.env` still changes the published port; only the script's "db is healthy on 127.0.0.1:…" message would keep showing 5432. Harmless; exporting the variable as written is the safe instruction.
