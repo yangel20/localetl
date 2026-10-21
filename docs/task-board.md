@@ -146,7 +146,7 @@ Deferred (user, 2026-10-20) until Wave 2 core and QA are complete: hardening tra
 | ID | Title | Owner | Files | Acceptance criteria | Status |
 |---|---|---|---|---|---|
 | VIZ-03 | Explorer polish | visualization-engineer | `frontend/src/features/explorer/**` | Rows table stays mounted during page/sort reload (no flash, focus kept); tests for datasets-list and profile error states; focus test | In progress: agent-viz, `viz/VIZ-03-explorer-polish` |
-| QA-08b | E2E counters from fixture | qa-engineer | `tests/e2e/**` | All five run counters asserted against `tests/fixtures/expected.json`; explorer total = loaded | In progress: agent-qa, `qa/QA-08b-e2e-counters` |
+| QA-08b | E2E counters from fixture | qa-engineer | `tests/e2e/**` | All five run counters asserted against `tests/fixtures/expected.json`; explorer total = loaded | **Done**: merged (code `2e9cd0a`; orchestrator review PASS; test-all 16/16; E2E 1/1). Limitation: UI builds its own default pipeline, not `orders_full.json`, so counters match only because both load all 200 rows |
 | QA-08c | First GitHub run of `e2e.yml` | qa-engineer | `.github/workflows/e2e.yml` | Workflow green on GitHub | **Blocked**: repo has no git remote; pushing needs user approval |
 
 ## Hardening track (DRAFT 2026-10-21, pending user approval)
