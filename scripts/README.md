@@ -35,3 +35,7 @@ POSTGRES_PORT=55432 scripts/test-all.sh        # same steps as .github/workflows
 - The DB suites create and drop throwaway databases, so the database role needs `CREATEDB` (the compose and CI `localetl` role is the superuser).
 - Lint scope: `ruff check` and `ruff format --check` over `backend` and `tests` with `backend/pyproject.toml`, run from the repo root.
 - The compose project name is pinned to `localetl`; set `COMPOSE_PROJECT_NAME` (and another `POSTGRES_PORT`) to run a second, throwaway stack beside the dev stack. The first `scripts/dev-up.sh` after this change recreates an existing dev container once (the data volume is kept) because the container is now named `localetl-db-1` instead of `localetl-db`.
+
+## e2e.sh (QA-08)
+
+`scripts/e2e.sh` starts the full stack on a throwaway database and runs the Playwright demo in `tests/e2e/`; see `tests/e2e/README.md`.
