@@ -1,5 +1,10 @@
-import { PagePlaceholder } from '../../components/PagePlaceholder';
+import { DatasetExplorer } from '../../features/explorer';
 
 export function DatasetsPage() {
-  return <PagePlaceholder title="Datasets" description="Published datasets will appear here." />;
+  return (
+    <section className="space-y-4">
+      <h1 className="text-2xl font-semibold">Datasets</h1>
+      <DatasetExplorer />
+    </section>
+  );
 }
