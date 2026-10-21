@@ -35,8 +35,10 @@ describe('DatasetExplorer', () => {
     await user.click(await screen.findByRole('button', { name: 'Next' }));
     await waitFor(() => expect(urls.some((u) => u.includes('offset=25'))).toBe(true));
     await user.click(await screen.findByRole('button', { name: 'amount' }));
-    await waitFor(() => expect(urls.at(-1)).toMatch(/sort=amount&order=asc|order=asc&sort=amount/));
-    expect(urls.filter((u) => u.includes('/rows')).at(-1)).toContain('offset=0');
+    const lastRows = () => urls.filter((u) => u.includes('/rows')).at(-1) ?? '';
+    await waitFor(() => expect(lastRows()).toContain('sort=amount'));
+    expect(lastRows()).toContain('order=asc');
+    expect(lastRows()).toContain('offset=0');
     expect(screen.getByRole('columnheader', { name: /amount/ })).toHaveAttribute('aria-sort', 'ascending');
   });
 
