@@ -23,3 +23,6 @@
 ## Notes (non-blocking)
 1. After a failed later-page or sort request the table keeps the previous page's rows while the header shows the newly requested sort (the alert explains the failure). Retrying means clicking again; there is no retry button.
 2. Focus behavior is verified in jsdom only, not in a real browser.
+
+## Superseding note (2026-10-21)
+The ruling above to **accept** the last-page focus loss is **withdrawn**. On the user's request I re-ruled: paging onto the last page leaves focus on `<body>`, which is a gap against criterion (3) and an accessibility defect (not an explicit WCAG 2.4.3 failure, but a loss of the keyboard user's position). It was fixed by VIZ-04 (`viz/VIZ-04-pager-focus` @ b1a6e22, see `VIZ-04.md`), which moves focus to the other pager button (or the status element on a single page) and adds a polite live region. The VIZ-03 PASS verdict itself is unchanged.
