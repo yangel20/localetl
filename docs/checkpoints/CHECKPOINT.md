@@ -4,7 +4,7 @@ Updated 2026-10-20 (session end) by the orchestrator. Read this first; `docs/tas
 
 ## State
 - **Wave 1 complete**: all tickets Done, `scripts/test-all.sh` 16/16 on `main`, QA-07 PASS, no open contract proposals. Last merge: Q12-1 contract + FE-02s (`043bb8a`). `main` = `git log -1`.
-- **Wave 2 in progress** (2026-10-21): WK-01..03, VIZ-01/02, FE-06, QA-07b, QA-09 Done (test-all 16/16 at each merge). Only QA-08 (Playwright E2E, MVP gate) remains: assigned to agent-qa. Then the deferred hardening track.
+- **Wave 2 complete** (2026-10-21): all tickets Done incl. QA-08 MVP E2E demo (passed by QA and independently by the orchestrator; recording under `tests/e2e/test-results/`, gitignored). Next: deferred hardening track (needs user go-ahead) and small follow-ups (VIZ-02 unmount flash and error-state tests; Recharts bundle size; `WorkerConfig` → `app.core.settings`; first GitHub run of `e2e.yml`). Run E2E: `npm --prefix tests/e2e ci && npm --prefix tests/e2e run install:browser && PYTHON=$PWD/backend/.venv/bin/python scripts/e2e.sh`.
 - Shared Postgres: compose project `localetl`, container `localetl-db-1`; as of 2026-10-21 published on `127.0.0.1:5432` (was 55432; check `docker port localetl-db-1`).
 
 ## Approvals and deferrals (2026-10-20, user)

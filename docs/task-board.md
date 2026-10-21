@@ -121,7 +121,7 @@ graph LR
   ETL07 & BE06 & QA03 & QA05 --> QA07
 ```
 
-## Wave 2 (approved 2026-10-20; in progress since 2026-10-21; only QA-08 remains)
+## Wave 2 (approved 2026-10-20; **complete 2026-10-21**)
 
 Approved by the user 2026-10-20. Starts after the user launches `agent-worker` and `agent-viz` (see `docs/checkpoints/CHECKPOINT.md`). Hardening track deferred until Wave 2 core and QA are complete.
 
@@ -135,7 +135,7 @@ Approved by the user 2026-10-20. Starts after the user launches `agent-worker` a
 | FE-06 | Mount VIZ screens | frontend-engineer | VIZ-01, VIZ-02 | `frontend/src/pages/datasets/**`, `src/pages/home/**`, `src/pages/runs/**`, `src/app/routes.tsx` | Explorer on Datasets page; charts on Home (amended 2026-10-21 per QA: Runs already shows the same metrics as text); routes + navigation; tests | **Done**: merged (code `e987eaf`; QA PASS `10f1213`; test-all 16/16). `src/test/setup.ts` ResizeObserver stub (frontend-owned, accepted); Recharts chunk > 500 kB (non-blocking) |
 | QA-07b | QA-07 uses the real worker persistence | qa-engineer | WK-02 | `tests/integration/test_wave1_flow.py` | Replace the `worker_finish` stand-in with WK-02 code; suite green | **Done**: merged (code `491d3a7`; orchestrator review PASS; test-all 16/16) |
 | QA-09 | Performance (REQ-61) | qa-engineer | WK-02 | `tests/perf/**` | 1M rows × 10 columns `replace` run < 5 min; memory bounded to ~one chunk; generated data never committed | **Done**: merged (code `74008e2`; orchestrator review PASS). Opt-in `LOCALETL_PERF=1`; one laptop run: 1M rows in 135 s, peak RSS flat (269 MB at 200k and 1M). Measures `run_pipeline`, not the worker's per-event transactions |
-| QA-08 | Playwright E2E demo (MVP gate) | qa-engineer | WK-02, WK-03, FE-06 | `tests/e2e/**` (own `package.json` with `@playwright/test`), `scripts/` launcher | Full stack (Postgres, API, worker, frontend): upload → configure → run → monitor → results and charts; recorded video/trace kept in an ignored directory; CI job. **Playwright and the launcher script approved 2026-10-20; implementation deferred to this ticket** | In progress: agent-qa, `qa/QA-08-e2e` (orchestrator reviews) |
+| QA-08 | Playwright E2E demo (MVP gate) | qa-engineer | WK-02, WK-03, FE-06 | `tests/e2e/**` (own `package.json` with `@playwright/test`), `scripts/` launcher | Full stack (Postgres, API, worker, frontend): upload → configure → run → monitor → results and charts; recorded video/trace kept in an ignored directory; CI job. **Playwright and the launcher script approved 2026-10-20; implementation deferred to this ticket** | **Done**: merged (code `3c7d1a3`; orchestrator review PASS; test-all 16/16). E2E 1/1 passed twice (QA, then orchestrator on the trial merge, 2026-10-21): real worker, exit 0 on SIGTERM, throwaway DB dropped. Recording: `tests/e2e/test-results/mvp-demo-MVP-demo-upload---8050d-results-explorer-and-charts-chromium/video.webm` (gitignored). Notes: Chromium only; spec checks extracted=200 and the reconciliation identity, not every `expected.json` counter; `e2e.yml` not yet run on GitHub |
 
 Critical path: WK-01 → WK-02 → WK-03 → QA-08. VIZ-01/02 → FE-06 in parallel; QA-09 and QA-07b after WK-02.
 
