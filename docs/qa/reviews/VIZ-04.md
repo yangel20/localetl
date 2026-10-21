@@ -35,3 +35,12 @@ With `main`'s `RowsTable.tsx` and the new test file: **4 of 5 fail** (last page,
    - **Correction on live-region assertions:** neither b1a6e22 nor 66f390f has a jsdom assertion for the `aria-live="polite"` / `role="status"` attributes (the tests check the status text only). The attribute was verified once in my real-Chromium check and is visible in `RowsTable.tsx`. Not a regression from this fix, but a gap: a one-line `expect(status()).toHaveAttribute('aria-live', 'polite')` would pin it (optional follow-up).
 2. **Old component:** with `main`'s `RowsTable.tsx` and the new test file, 4 of 5 fail (last page, first page, non-final, single page); "does not steal focus" passes on old code, as before.
 3. **Suites:** `npm test` 152 passed on 3 consecutive full runs (load average ~100–150 at the time); the 5 focus tests take 0.73 s in total (was ~7 s); `npm run lint` and `npm run typecheck` exit 0; `npm run build` OK. The E2E result above stands because `RowsTable.tsx` is unchanged.
+
+## Final re-check (2026-10-21) — **PASS** at **9e381bd**
+- Target: `viz/VIZ-04-pager-focus` @ **9e381bd** (test-only, +2/-1 on 66f390f; `RowsTable.tsx` unchanged). `status()` now uses `getByRole('status')`, and the last-page test asserts `aria-live="polite"`. This closes the live-region gap noted above.
+- Focus file: **5 passed**. `npm run lint` and `npm run typecheck`: exit 0. (No full-suite loop, per the orchestrator.)
+- **Mutations of `RowsTable.tsx`** (each reverted afterwards, worktree clean):
+  - without `aria-live="polite"`: **1 of 5 fails** (the last-page test's new assertion);
+  - without `role="status"`: **4 of 5 fail** (`getByRole('status')` finds nothing; the no-steal test never queries the status);
+  - with `main`'s `RowsTable.tsx`: **4 of 5 fail** (last page, first page, non-final, single page); no-steal passes as before.
+- Requirement 5 (polite announcement) is now protected by a test.
