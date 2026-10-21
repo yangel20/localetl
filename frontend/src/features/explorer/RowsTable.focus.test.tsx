@@ -15,7 +15,7 @@ function Harness({ total }: { total: number }) {
   return <RowsTable page={mk(total, offset)} sort={null} onSort={noop} onOffset={setOffset} />;
 }
 
-const status = () => screen.getByTestId('pager-status');
+const status = () => screen.getByRole('status');
 const prev = () => screen.getByRole('button', { name: 'Previous' });
 const next = () => screen.getByRole('button', { name: 'Next' });
 
@@ -27,6 +27,7 @@ describe('pager keyboard focus', () => {
     next().focus();
     await user.keyboard('{Enter}');
     expect(status()).toHaveTextContent('26–30 of 30');
+    expect(status()).toHaveAttribute('aria-live', 'polite');
     expect(next()).toBeDisabled();
     expect(prev()).toHaveFocus();
     expect(document.body).not.toHaveFocus();
