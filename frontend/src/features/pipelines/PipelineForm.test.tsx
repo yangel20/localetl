@@ -1,12 +1,17 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDS, pipeline, source } from '../../app/api/fixtures';
 import { ApiError } from '../../app/api/errors';
 import { createMockFetch, errorResponse } from '../../app/api/mockFetch';
 import type { PipelineCreate } from '../../app/api/types';
 import { moveItem } from './configModel';
 import { emptyDraft, PipelineForm, type PipelineDraft } from './PipelineForm';
+
+let user: ReturnType<typeof userEvent.setup>;
+beforeEach(() => {
+  user = userEvent.setup({ delay: null });
+});
 
 type Overrides = Parameters<typeof createMockFetch>[0];
 const json = (b: unknown) => new Response(JSON.stringify(b), { headers: { 'Content-Type': 'application/json' } });
@@ -29,7 +34,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('building from a source', () => {
   it('fills columns from the source and offers only the 7 operations and 6 rules', async () => {
     setup(emptyDraft());
-    await userEvent.selectOptions(screen.getByLabelText('Data source'), 'orders');
+    await user.selectOptions(screen.getByLabelText('Data source'), 'orders');
     expect(screen.getByLabelText('Name for order_id')).toHaveValue('order_id');
     expect(screen.getByLabelText('Type for amount')).toHaveValue('float');
     const ops = within(screen.getByLabelText('Add transformation')).getAllByRole('option').slice(1);
@@ -40,12 +45,14 @@ describe('building from a source', () => {
 
   it('saves a valid config built through the UI', async () => {
     const { onSave } = setup(emptyDraft());
-    await userEvent.type(screen.getByLabelText('Name'), 'My pipeline');
-    await userEvent.selectOptions(screen.getByLabelText('Data source'), 'orders');
-    await userEvent.type(screen.getByLabelText('Target table'), 'orders_out');
-    await userEvent.selectOptions(screen.getByLabelText('Add transformation'), 'trim_whitespace');
-    await userEvent.selectOptions(screen.getByLabelText('Add validation'), 'not_null');
-    await userEvent.click(screen.getByRole('button', { name: 'Save pipeline' }));
+    await user.click(screen.getByLabelText('Name'));
+    await user.paste('My pipeline');
+    await user.selectOptions(screen.getByLabelText('Data source'), 'orders');
+    await user.click(screen.getByLabelText('Target table'));
+    await user.paste('orders_out');
+    await user.selectOptions(screen.getByLabelText('Add transformation'), 'trim_whitespace');
+    await user.selectOptions(screen.getByLabelText('Add validation'), 'not_null');
+    await user.click(screen.getByRole('button', { name: 'Save pipeline' }));
     expect(onSave).toHaveBeenCalledTimes(1);
     const body = onSave.mock.calls[0]![0];
     expect(body.name).toBe('My pipeline');
@@ -59,10 +66,12 @@ describe('building from a source', () => {
 describe('client checks', () => {
   it('blocks saving and shows errors at their JSON Pointer path', async () => {
     const { onSave } = setup(emptyDraft());
-    await userEvent.type(screen.getByLabelText('Name'), 'p');
-    await userEvent.selectOptions(screen.getByLabelText('Data source'), 'orders');
-    await userEvent.type(screen.getByLabelText('Target table'), 'Bad-Name');
-    await userEvent.click(screen.getByRole('button', { name: 'Save pipeline' }));
+    await user.click(screen.getByLabelText('Name'));
+    await user.paste('p');
+    await user.selectOptions(screen.getByLabelText('Data source'), 'orders');
+    await user.click(screen.getByLabelText('Target table'));
+    await user.paste('Bad-Name');
+    await user.click(screen.getByRole('button', { name: 'Save pipeline' }));
     expect(onSave).not.toHaveBeenCalled();
     const alert = document.querySelector('[data-path="/target/table"]')!;
     expect(alert).toHaveTextContent(/lowercase letters/);
@@ -72,27 +81,28 @@ describe('client checks', () => {
   it('rule 7: a format is dropped when the type no longer allows it', async () => {
     setup({ ...existing(), config: { ...existing().config, columns: [{ source: 'd', name: 'd', type: 'date', format: '%d/%m/%Y' }], transformations: [], validations: [] } });
     expect(screen.getByLabelText('Date format for d')).toHaveValue('%d/%m/%Y');
-    await userEvent.selectOptions(screen.getByLabelText('Type for d'), 'string');
+    await user.selectOptions(screen.getByLabelText('Type for d'), 'string');
     expect(screen.queryByLabelText('Date format for d')).toBeNull();
   });
 
   it('explains a time directive in a date format', async () => {
     setup({ ...existing(), config: { ...existing().config, columns: [{ source: 'd', name: 'd', type: 'date' }], transformations: [], validations: [] } });
-    await userEvent.type(screen.getByLabelText('Date format for d'), '%Y %H');
+    await user.click(screen.getByLabelText('Date format for d'));
+    await user.paste('%Y %H');
     expect(screen.getByText(/may not contain time directives/)).toBeInTheDocument();
   });
 
   it('types fill_null values for the column (number, not text)', async () => {
     const { onSave } = setup(existing());
-    await userEvent.selectOptions(screen.getByLabelText('Add transformation'), 'fill_null');
+    await user.selectOptions(screen.getByLabelText('Add transformation'), 'fill_null');
     // first column is order_id (integer)
     const input = screen.getByLabelText('Fill value');
-    await userEvent.clear(input);
-    await userEvent.type(input, 'abc');
+    await user.clear(input);
+    await user.type(input, 'abc');
     expect(screen.getByText('Enter a whole number.')).toBeInTheDocument();
-    await userEvent.clear(input);
-    await userEvent.type(input, '7');
-    await userEvent.click(screen.getByRole('button', { name: 'Save pipeline' }));
+    await user.clear(input);
+    await user.type(input, '7');
+    await user.click(screen.getByRole('button', { name: 'Save pipeline' }));
     const t = onSave.mock.calls[0]![0].config.transformations!;
     expect(t.at(-1)).toEqual({ op: 'fill_null', column: 'order_id', value: 7 });
   });
@@ -115,11 +125,11 @@ describe('reordering', () => {
     ];
     const { onSave } = setup(draft);
     expect(screen.getByRole('button', { name: 'Move transformation 1 up' })).toBeDisabled();
-    await userEvent.click(screen.getByRole('button', { name: 'Move transformation 1 down' }));
+    await user.click(screen.getByRole('button', { name: 'Move transformation 1 down' }));
     const items = screen.getAllByRole('listitem').filter((li) => li.getAttribute('aria-label')?.startsWith('Transformation'));
     expect(items[0]).toHaveAccessibleName(/Round numbers/);
     expect(within(items[0]!).getByLabelText('Decimal places (0–10)')).toHaveValue(3);
-    await userEvent.click(screen.getByRole('button', { name: 'Save pipeline' }));
+    await user.click(screen.getByRole('button', { name: 'Save pipeline' }));
     expect(onSave.mock.calls[0]![0].config.transformations!.map((t) => t.op)).toEqual(['round_number', 'trim_whitespace']);
   });
 });
@@ -133,7 +143,7 @@ describe('server validation', () => {
         return json({ valid: false, errors: [{ path: '/config/validations/0/column', message: 'unknown column' }] });
       },
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+    await user.click(screen.getByRole('button', { name: 'Validate' }));
     const at = await vi.waitFor(() => {
       const el = document.querySelector('[data-path="/validations/0"]');
       if (!el) throw new Error('not yet');
@@ -148,7 +158,7 @@ describe('server validation', () => {
       'POST /pipelines/validate': () =>
         json({ valid: false, errors: [{ path: '/target/table', message: 'bare path error' }] }),
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+    await user.click(screen.getByRole('button', { name: 'Validate' }));
     await vi.waitFor(() => {
       expect(document.querySelector('[data-path="/target/table"]')).toHaveTextContent('bare path error');
     });
@@ -156,7 +166,7 @@ describe('server validation', () => {
 
   it('reports a valid config', async () => {
     setup(existing());
-    await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+    await user.click(screen.getByRole('button', { name: 'Validate' }));
     expect(await screen.findByText('The configuration is valid.')).toBeInTheDocument();
   });
 
@@ -165,14 +175,14 @@ describe('server validation', () => {
       throw new ApiError(422, 'validation_error', 'Invalid pipeline', [{ path: '/config/target/table', message: 'reserved name' }]);
     });
     setup(existing(), {}, onSave);
-    await userEvent.click(screen.getByRole('button', { name: 'Save pipeline' }));
+    await user.click(screen.getByRole('button', { name: 'Save pipeline' }));
     expect(await screen.findByText('Invalid pipeline')).toBeInTheDocument();
     expect(document.querySelector('[data-path="/target/table"]')).toHaveTextContent('reserved name');
   });
 
   it('shows a transport failure from validate', async () => {
     setup(existing(), { 'POST /pipelines/validate': () => errorResponse(500, 'internal_error', 'Server exploded') });
-    await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+    await user.click(screen.getByRole('button', { name: 'Validate' }));
     expect(await screen.findByText('Server exploded')).toBeInTheDocument();
   });
 });
