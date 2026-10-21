@@ -1,5 +1,10 @@
-import { PagePlaceholder } from '../../components/PagePlaceholder';
+import { RunAnalytics } from '../../features/analytics';
 
 export function HomePage() {
-  return <PagePlaceholder title="Home" description="Overview of your sources, pipelines and recent runs." />;
+  return (
+    <section className="space-y-4">
+      <h1 className="text-2xl font-semibold">Home</h1>
+      <RunAnalytics />
+    </section>
+  );
 }
