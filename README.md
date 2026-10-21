@@ -83,8 +83,10 @@ database volume, `.env`, the data directory or `.claude/worktrees`.
 
 ## Configuration
 
-All settings are environment variables; `.env.example` lists every one with its default. The scripts read
-them in this order: variables already in your environment, then `.env`, then `.env.example`.
+All settings are environment variables; `.env.example` lists every one with its default. `scripts/dev.sh`
+reads them in this order: variables already in your environment, then `.env`, then `.env.example`. The
+backend itself does not read `.env`, and `scripts/test-all.sh` and `scripts/e2e.sh` use only the environment
+(with their own defaults).
 `.env` is parsed as plain `KEY=VALUE` lines (one layer of quotes removed, nothing expanded or executed) and
 only keys declared in `.env.example` are accepted. Never commit `.env`.
 
