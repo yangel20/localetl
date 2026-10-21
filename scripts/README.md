@@ -31,10 +31,13 @@ docker compose down -v        # stop and DELETE the volume (full reset)
 ## Running all checks
 
 ```bash
-python3.11 -m venv .venv && . .venv/bin/activate && pip install -e 'backend[dev]'
-POSTGRES_PORT=55432 scripts/dev-up.sh          # if no Postgres is running; 55432 when Postgres.app owns 5432
-POSTGRES_PORT=55432 scripts/test-all.sh        # same steps as .github/workflows/ci.yml
+scripts/setup.sh                                  # creates/reuses backend/.venv, installs backend and frontend deps
+scripts/dev-up.sh                                 # PostgreSQL on 127.0.0.1:5432
+PYTHON=$PWD/backend/.venv/bin/python scripts/test-all.sh   # same steps as .github/workflows/ci.yml
 ```
+
+- If another Postgres already owns port 5432 (e.g. Postgres.app), prefix the last two commands with `POSTGRES_PORT=55432` (the conflict case only).
+- `scripts/stop.sh` never deletes volumes or data. `docker compose down -v` is the manual, destructive reset (it deletes the database volume).
 
 - CI (`.github/workflows/ci.yml`) installs with `pip install -e 'backend[dev]'`, starts a Postgres 16 service, creates `localetl_test`, and calls `scripts/test-all.sh`, so local and CI results match.
 - The DB suites create and drop throwaway databases, so the database role needs `CREATEDB` (the compose and CI `localetl` role is the superuser).
