@@ -141,6 +141,45 @@ Critical path: WK-01 → WK-02 → WK-03 → QA-08. VIZ-01/02 → FE-06 in paral
 
 Deferred (user, 2026-10-20) until Wave 2 core and QA are complete: hardening track for Q8-2..12, Q9, Q10, Q12-2/3.
 
+## Wave 2 follow-ups (approved 2026-10-21)
+
+| ID | Title | Owner | Files | Acceptance criteria | Status |
+|---|---|---|---|---|---|
+| VIZ-03 | Explorer polish | visualization-engineer | `frontend/src/features/explorer/**` | Rows table stays mounted during page/sort reload (no flash, focus kept); tests for datasets-list and profile error states; focus test | In progress: agent-viz, `viz/VIZ-03-explorer-polish` |
+| QA-08b | E2E counters from fixture | qa-engineer | `tests/e2e/**` | All five run counters asserted against `tests/fixtures/expected.json`; explorer total = loaded | In progress: agent-qa, `qa/QA-08b-e2e-counters` |
+| QA-08c | First GitHub run of `e2e.yml` | qa-engineer | `.github/workflows/e2e.yml` | Workflow green on GitHub | **Blocked**: repo has no git remote; pushing needs user approval |
+
+## Hardening track (DRAFT 2026-10-21, pending user approval)
+
+Orchestrator recommendations. "Document" = confirm current behavior in architecture §6 (orchestrator, no code). "Fix" items become tickets after approval; items marked (env) would add an environment variable to `.env.example` (shared, needs approval).
+
+| Item | Recommendation | Ticket |
+|---|---|---|
+| Q8-2 `_localetl_` column prefix | Fix: §6 rule rejecting target columns with that prefix (avoids collision with internal columns) | H-ETL-1 |
+| Q8-3 replace-mode ACCESS EXCLUSIVE lock | Document as known limitation | — |
+| Q8-4 unusable strptime formats | Fix: reject at config time | H-ETL-1 |
+| Q8-5 quoting-fault `parse_error` value = raw record | Document | — |
+| Q8-6 config ISO date strings not stripped | Fix: strip like numeric/boolean (consistency) | H-ETL-1 |
+| Q8-7 empty config strings for numeric/boolean rejected | Document (current behavior correct) | — |
+| Q8-8 string range bounds on number columns rejected | Document (§6 rule 4 stands) | — |
+| Q8-9 `0`/`1` + `yes`/`true` infer boolean | Document | — |
+| Q8-10 replace publish has no `lock_timeout` | Fix: `SET LOCAL lock_timeout` (fixed 5 s constant, no new env var) → `LoadError` | H-ETL-1 |
+| Q8-11 append compatibility order-sensitive | Document as intended | — |
+| Q8-12 faulty first record = file-level `CsvFormatError` | Document as Q4 rule 5 clarification | — |
+| Q9 (1–7) transform semantics | Document all seven as implemented | — |
+| Q10-1 dependency drift | Fix: `backend/constraints.txt` + pytest `filterwarnings` | H-QA-1 |
+| Q10-2 lint `contracts/tools` | Fix the findings (orchestrator-owned path) | H-ORCH-1 |
+| Q10-3 NUL byte fails the whole run at load | Fix: reject the row as `parse_error` | H-ETL-1 |
+| Q10-4 preview succeeds on late-fault file | Document (preview is a sample) | — |
+| Q10-5 whitespace-only header accepted | Fix: reject as `CsvFormatError` | H-ETL-1 |
+| Q12-2 stale partial uploads in `tmp/` | Fix: clean at API startup | H-BE-1 |
+| Q12-3 ETL-07 event-order notes | Document | — |
+| WK-01 QA note: `WorkerConfig` → `app.core.settings` | Fix | H-BE-1 (backend) then worker import update |
+| WK-02 QA note: crash between publish and success txn | Document as known limitation of §7.2 | — |
+| FE-06 note: Recharts chunk > 500 kB | Fix: lazy-load Home and Datasets routes | H-FE-1 |
+
+Proposed order (after approval): orchestrator §6 doc update first (H-ETL-1 depends on it) → H-ETL-1, H-BE-1, H-QA-1, H-FE-1 in parallel → QA review each → full suite + E2E at each merge.
+
 ## Review log
 
 | Ticket | Branch / commits | Merge | Reviewer | Verdict | Evidence | Follow-ups |
