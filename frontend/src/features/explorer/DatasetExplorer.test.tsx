@@ -18,7 +18,7 @@ function setup(overrides = {}) {
 describe('DatasetExplorer', () => {
   it('lists datasets, shows rows and profile charts after selecting', async () => {
     setup();
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(await screen.findByRole('button', { name: /orders_clean/ }));
     expect(await screen.findByText('Grace')).toBeInTheDocument();
     expect(screen.getByText('∅', { selector: 'td' })).toBeInTheDocument();
@@ -30,7 +30,7 @@ describe('DatasetExplorer', () => {
 
   it('sorts a single column through the API and resets paging', async () => {
     const urls = setup({ 'GET /datasets/[^/]+/rows': json({ ...datasetRows, total: 60, limit: 25 }) });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(await screen.findByRole('button', { name: /orders_clean/ }));
     await user.click(await screen.findByRole('button', { name: 'Next' }));
     await waitFor(() => expect(urls.some((u) => u.includes('offset=25'))).toBe(true));
@@ -49,7 +49,7 @@ describe('DatasetExplorer', () => {
 
   it('shows API errors for rows', async () => {
     setup({ 'GET /datasets/[^/]+/rows': () => errorResponse(422, 'validation_error', 'bad sort') });
-    await userEvent.setup().click(await screen.findByRole('button', { name: /orders_clean/ }));
+    await userEvent.setup({ delay: null }).click(await screen.findByRole('button', { name: /orders_clean/ }));
     expect(await screen.findByText('bad sort')).toBeInTheDocument();
   });
 });
@@ -70,7 +70,7 @@ describe('DatasetExplorer polish (VIZ-03)', () => {
         return json({ ...datasetRows, total: 60, limit: 25 })();
       },
     });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(await screen.findByRole('button', { name: /orders_clean/ }));
     const header = await screen.findByRole('button', { name: 'amount' });
     const rowsTable = () => within(screen.getByLabelText('Rows')).getByRole('table');
@@ -90,7 +90,7 @@ describe('DatasetExplorer polish (VIZ-03)', () => {
 
   it('keeps focus on Next while paging', async () => {
     setup({ 'GET /datasets/[^/]+/rows': json({ ...datasetRows, total: 80, limit: 25 }) });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(await screen.findByRole('button', { name: /orders_clean/ }));
     const next = await screen.findByRole('button', { name: 'Next' });
     await user.click(next);
@@ -105,7 +105,7 @@ describe('DatasetExplorer polish (VIZ-03)', () => {
       'GET /datasets/[^/]+/rows': () =>
         ++calls > 1 ? errorResponse(500, 'internal_error', 'page failed') : json({ ...datasetRows, total: 60, limit: 25 })(),
     });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     await user.click(await screen.findByRole('button', { name: /orders_clean/ }));
     await user.click(await screen.findByRole('button', { name: 'Next' }));
     expect(await screen.findByText('page failed')).toBeInTheDocument();
@@ -120,14 +120,14 @@ describe('DatasetExplorer polish (VIZ-03)', () => {
 
   it('isolates a profile error from the rows table', async () => {
     setup({ 'GET /datasets/[^/]+/profile': () => errorResponse(500, 'internal_error', 'profile failed') });
-    await userEvent.setup().click(await screen.findByRole('button', { name: /orders_clean/ }));
+    await userEvent.setup({ delay: null }).click(await screen.findByRole('button', { name: /orders_clean/ }));
     expect(await screen.findByText('profile failed')).toBeInTheDocument();
     expect(await screen.findByText('Grace')).toBeInTheDocument();
   });
 
   it('isolates a rows error from the profile charts', async () => {
     setup({ 'GET /datasets/[^/]+/rows': () => errorResponse(500, 'internal_error', 'rows failed') });
-    await userEvent.setup().click(await screen.findByRole('button', { name: /orders_clean/ }));
+    await userEvent.setup({ delay: null }).click(await screen.findByRole('button', { name: /orders_clean/ }));
     expect(await screen.findByText('rows failed')).toBeInTheDocument();
     expect(await screen.findByLabelText('Profile of customer')).toBeInTheDocument();
   });

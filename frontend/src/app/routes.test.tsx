@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { routes } from './routes';
 
+let user: ReturnType<typeof userEvent.setup>;
+beforeEach(() => {
+  user = userEvent.setup({ delay: null });
+});
+
 function renderAt(path: string) {
   render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [path] })} />);
 }
@@ -26,7 +31,7 @@ describe('app shell', () => {
 
   it('navigates via the sidebar', async () => {
     renderAt('/');
-    await userEvent.click(screen.getByRole('link', { name: 'Runs' }));
+    await user.click(screen.getByRole('link', { name: 'Runs' }));
     expect(screen.getByRole('heading', { level: 1, name: 'Runs' })).toBeInTheDocument();
   });
 });

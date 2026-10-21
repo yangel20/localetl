@@ -1,10 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDS, pipeline } from '../../app/api/fixtures';
 import { createMockFetch, errorResponse } from '../../app/api/mockFetch';
 import { routes } from '../../app/routes';
+
+let user: ReturnType<typeof userEvent.setup>;
+beforeEach(() => {
+  user = userEvent.setup({ delay: null });
+});
 
 type Overrides = Parameters<typeof createMockFetch>[0];
 const json = (b: unknown, status = 200) =>
@@ -44,7 +49,7 @@ describe('pipeline list', () => {
       'GET /pipelines': ({ url }) => json({ total: 30, limit: 20, offset: Number(url.searchParams.get('offset')), items: [pipeline] }),
     });
     await screen.findByText('1–20 of 30');
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByText('21–30 of 30');
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('offset=20'))).toBe(true);
   });
@@ -58,9 +63,9 @@ describe('pipeline list', () => {
         return new Response(null, { status: 204 });
       },
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete Orders cleanup' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete Orders cleanup' }));
     expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'DELETE')).toBe(false); // needs confirmation
-    await userEvent.click(screen.getByRole('button', { name: 'Confirm delete Orders cleanup' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm delete Orders cleanup' }));
     expect(await screen.findByText(/No pipelines yet/)).toBeInTheDocument();
   });
 
@@ -68,8 +73,8 @@ describe('pipeline list', () => {
     renderAt('/pipelines', {
       'DELETE /pipelines/[^/]+': () => errorResponse(409, 'conflict', 'Pipeline has a queued or running run'),
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'Delete Orders cleanup' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Confirm delete Orders cleanup' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete Orders cleanup' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm delete Orders cleanup' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Pipeline has a queued or running run');
     expect(screen.getByRole('link', { name: 'Orders cleanup' })).toBeInTheDocument(); // still listed
   });
@@ -89,10 +94,12 @@ describe('new pipeline', () => {
         return json(pipeline, 201);
       },
     });
-    await userEvent.type(await screen.findByLabelText('Name'), 'Fresh');
-    await userEvent.selectOptions(screen.getByLabelText('Data source'), 'orders');
-    await userEvent.type(screen.getByLabelText('Target table'), 'fresh_out');
-    await userEvent.click(screen.getByRole('button', { name: 'Create pipeline' }));
+    await user.click(await screen.findByLabelText('Name'));
+    await user.paste('Fresh');
+    await user.selectOptions(screen.getByLabelText('Data source'), 'orders');
+    await user.click(screen.getByLabelText('Target table'));
+    await user.paste('fresh_out');
+    await user.click(screen.getByRole('button', { name: 'Create pipeline' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/pipelines'));
     expect(created?.name).toBe('Fresh');
     expect(created?.config.columns).toHaveLength(3);
@@ -102,10 +109,12 @@ describe('new pipeline', () => {
     const { router } = renderAt('/pipelines/new', {
       'POST /pipelines': () => errorResponse(409, 'conflict', 'A pipeline with this name already exists'),
     });
-    await userEvent.type(await screen.findByLabelText('Name'), 'Dup');
-    await userEvent.selectOptions(screen.getByLabelText('Data source'), 'orders');
-    await userEvent.type(screen.getByLabelText('Target table'), 'dup_out');
-    await userEvent.click(screen.getByRole('button', { name: 'Create pipeline' }));
+    await user.click(await screen.findByLabelText('Name'));
+    await user.paste('Dup');
+    await user.selectOptions(screen.getByLabelText('Data source'), 'orders');
+    await user.click(screen.getByLabelText('Target table'));
+    await user.paste('dup_out');
+    await user.click(screen.getByRole('button', { name: 'Create pipeline' }));
     expect(await screen.findByText('A pipeline with this name already exists')).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/pipelines/new');
   });
@@ -131,9 +140,10 @@ describe('edit pipeline', () => {
       },
     });
     const name = await screen.findByLabelText('Name');
-    await userEvent.clear(name);
-    await userEvent.type(name, 'Renamed');
-    await userEvent.click(screen.getByRole('button', { name: 'Save pipeline' }));
+    await user.clear(name);
+    await user.click(name);
+    await user.paste('Renamed');
+    await user.click(screen.getByRole('button', { name: 'Save pipeline' }));
     expect(await screen.findByText('Saved (version 2).')).toBeInTheDocument();
     expect(put?.name).toBe('Renamed');
     expect(fetchMock.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(true);
@@ -149,7 +159,7 @@ describe('edit pipeline', () => {
       'PUT /pipelines/[^/]+': () =>
         errorResponse(422, 'validation_error', 'Invalid config', [{ path: '/config/target/table', message: 'reserved name' }]),
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'Save pipeline' }));
+    await user.click(await screen.findByRole('button', { name: 'Save pipeline' }));
     await screen.findByText('Invalid config');
     expect(document.querySelector('[data-path="/target/table"]')).toHaveTextContent('reserved name');
   });

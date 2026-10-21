@@ -1,10 +1,15 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDS, rejections, runRunning, runSucceeded } from '../../app/api/fixtures';
 import { createMockFetch, errorResponse } from '../../app/api/mockFetch';
 import { routes } from '../../app/routes';
+
+let user: ReturnType<typeof userEvent.setup>;
+beforeEach(() => {
+  user = userEvent.setup({ delay: null });
+});
 
 type Overrides = Parameters<typeof createMockFetch>[0];
 const json = (b: unknown, status = 200) =>
@@ -40,10 +45,10 @@ describe('run history', () => {
   it('filters by pipeline and status through query parameters and resets paging', async () => {
     const { calls } = renderAt('/runs');
     await screen.findAllByRole('link', { name: 'Orders cleanup' });
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'failed');
+    await user.selectOptions(screen.getByLabelText('Status'), 'failed');
     await waitFor(() => expect(calls('/runs').some(([u]) => String(u).includes('status=failed'))).toBe(true));
     const history = screen.getByRole('region', { name: 'History' });
-    await userEvent.selectOptions(within(history).getByLabelText('Pipeline'), IDS.pipeline);
+    await user.selectOptions(within(history).getByLabelText('Pipeline'), IDS.pipeline);
     await waitFor(() => {
       const last = String(calls('/runs').at(-1)![0]);
       expect(last).toContain(`pipeline_id=${IDS.pipeline}`);
@@ -60,7 +65,7 @@ describe('run history', () => {
           : errorResponse(500, 'internal_error', 'history unavailable'),
     });
     expect(await screen.findByText('history unavailable')).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'failed');
+    await user.selectOptions(screen.getByLabelText('Status'), 'failed');
     expect(await screen.findByText('No runs match these filters.')).toBeInTheDocument();
   });
 
@@ -69,7 +74,7 @@ describe('run history', () => {
       'GET /runs': ({ url }) => json({ total: 45, limit: 20, offset: Number(url.searchParams.get('offset')), items: [runSucceeded] }),
     });
     await screen.findByText('1–20 of 45');
-    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByText('21–40 of 45');
     expect(calls('/runs').some(([u]) => String(u).includes('offset=20'))).toBe(true);
   });
@@ -81,8 +86,8 @@ describe('run starter', () => {
     const starter = await screen.findByRole('region', { name: 'Start a run' });
     const run = within(starter).getByRole('button', { name: 'Run' });
     expect(run).toBeDisabled();
-    await userEvent.selectOptions(await within(starter).findByLabelText('Pipeline'), IDS.pipeline);
-    await userEvent.click(run);
+    await user.selectOptions(await within(starter).findByLabelText('Pipeline'), IDS.pipeline);
+    await user.click(run);
     await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/runs\/4444/));
     expect(calls(`/pipelines/${IDS.pipeline}/runs`)).toHaveLength(1);
   });
@@ -92,8 +97,8 @@ describe('run starter', () => {
       'POST /pipelines/[^/]+/runs': () => errorResponse(409, 'conflict', 'Pipeline already has a queued or running run'),
     });
     const starter = await screen.findByRole('region', { name: 'Start a run' });
-    await userEvent.selectOptions(await within(starter).findByLabelText('Pipeline'), IDS.pipeline);
-    await userEvent.click(within(starter).getByRole('button', { name: 'Run' }));
+    await user.selectOptions(await within(starter).findByLabelText('Pipeline'), IDS.pipeline);
+    await user.click(within(starter).getByRole('button', { name: 'Run' }));
     expect(await within(starter).findByRole('alert')).toHaveTextContent('Pipeline already has a queued or running run');
     expect(starter).toHaveTextContent(/Wait for it to finish/);
     expect(router.state.location.pathname).toBe('/runs');
@@ -129,7 +134,7 @@ describe('run detail', () => {
     });
     const rej = await screen.findByRole('region', { name: 'Rejected rows' });
     expect(await within(rej).findAllByText('7')).toHaveLength(2);
-    await userEvent.click(within(rej).getByRole('button', { name: 'Next' }));
+    await user.click(within(rej).getByRole('button', { name: 'Next' }));
     await within(rej).findByText('51–100 of 120');
     expect(calls('/rejections').some(([u]) => String(u).includes('offset=50'))).toBe(true);
   });
