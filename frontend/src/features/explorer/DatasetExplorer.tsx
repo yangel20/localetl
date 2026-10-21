@@ -14,7 +14,7 @@ function Selected({ client, id, width }: { client: Client; id: string; width?: n
   const [sort, setSort] = useState<SortState | null>(null);
   const [offset, setOffset] = useState(0);
   const rows = useApiData(
-    (s) => client.listDatasetRows(id, { limit: PAGE_SIZE, offset, ...(sort ?? {}) }, s),
+    (s) => client.listDatasetRows(id, { limit: PAGE_SIZE, offset, ...(sort ? { sort: sort.column, order: sort.order } : {}) }, s),
     [client, id, offset, sort?.column, sort?.order],
   );
   const profile = useApiData((s) => client.getDatasetProfile(id, s), [client, id]);
