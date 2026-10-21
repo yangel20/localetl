@@ -21,7 +21,7 @@ const next = () => screen.getByRole('button', { name: 'Next' });
 
 describe('pager keyboard focus', () => {
   it('Next onto the last page moves focus to Previous', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<Harness total={30} />); // pages: 1–25, 26–30
     expect(status()).toHaveTextContent('1–25 of 30');
     next().focus();
@@ -34,7 +34,7 @@ describe('pager keyboard focus', () => {
   });
 
   it('Previous onto the first page moves focus to Next', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<Harness total={30} />);
     next().focus();
     await user.keyboard('{Enter}');
@@ -48,7 +48,7 @@ describe('pager keyboard focus', () => {
   });
 
   it('non-final pages keep focus on the activated button', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<Harness total={80} />); // 1–25, 26–50, 51–75, 76–80
     next().focus();
     await user.keyboard('{Enter}');
@@ -64,7 +64,7 @@ describe('pager keyboard focus', () => {
   });
 
   it('single-page results move focus to the pager status', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { rerender } = render(<RowsTable page={mk(60, 0)} sort={null} onSort={noop} onOffset={noop} />);
     next().focus();
     await user.keyboard('{Enter}');
@@ -78,7 +78,7 @@ describe('pager keyboard focus', () => {
   });
 
   it('does not steal focus the user moved elsewhere', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const { rerender } = render(<RowsTable page={mk(60, 0)} sort={null} onSort={noop} onOffset={noop} />);
     next().focus();
     await user.keyboard('{Enter}');

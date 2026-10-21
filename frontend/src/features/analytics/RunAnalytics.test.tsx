@@ -27,7 +27,7 @@ describe('RunAnalytics', () => {
       'GET /metrics/summary': json({ ...metricsSummary, total_runs: 0, avg_duration_ms: null, daily: [] }),
       'GET /runs': json({ total: 0, limit: 50, offset: 0, items: [] }),
     });
-    render(<RunAnalytics client={c} />);
+    render(<RunAnalytics client={c} width={600} />);
     expect(await screen.findByText('No runs yet.')).toBeInTheDocument();
     expect(await screen.findByText('No succeeded runs yet.')).toBeInTheDocument();
   });
