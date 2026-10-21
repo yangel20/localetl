@@ -4,6 +4,11 @@
 |---|---|
 | `dev-up.sh [timeout]` | `docker compose up -d db`, then wait until the healthcheck reports healthy (default 60 s). |
 | `test-all.sh [--skip-frontend] [--skip-db]` | Runs every check CI runs (hygiene, contract check, Redocly, ruff + mypy, backend/fixtures/integration pytest, frontend test/lint/typecheck/build, generated-types drift) and prints a PASS/SKIP/FAIL summary. Never starts or stops the database. |
+| `setup.sh` | One-time/repeatable setup: checks Python 3.11-3.12, Node 22, npm, Docker + Compose; creates or reuses `backend/.venv`; `pip install -e 'backend[dev]'`; `npm --prefix frontend ci`. Idempotent; never touches DB volumes, `.env`, the data dir or worktrees. |
+| `dev.sh` | Starts the DB (`dev-up.sh`), `alembic upgrade head`, the API (:8000), the worker and the Vite dev server (:5173) in the foreground; Ctrl+C stops them (worker must exit 0). |
+| `stop.sh [--db]` | Stops only the processes recorded in `.localetl/dev.pids` after verifying each; `--db` also runs `docker compose stop db`. |
+| `build.sh` | Frontend build, backend ruff + mypy, single Alembic head, `pip wheel`. Names the failing step. |
+| `lib/stack.sh` | Shared helpers (safe `.env` parser, URL masking, PID-file verification). Sourced, not run. |
 | `db/init.sql` | Mounted into the Postgres init directory; creates `localetl_test`. |
 
 ## Database stack
@@ -39,3 +44,23 @@ POSTGRES_PORT=55432 scripts/test-all.sh        # same steps as .github/workflows
 ## e2e.sh (QA-08)
 
 `scripts/e2e.sh` starts the full stack on a throwaway database and runs the Playwright demo in `tests/e2e/`; see `tests/e2e/README.md`.
+
+## Developer workflow (DX-01a)
+
+```bash
+scripts/setup.sh        # once (Node 22 expected; LOCALETL_ALLOW_ANY_NODE=1 accepts another major)
+scripts/dev.sh          # DB + migrations + API + worker + frontend; Ctrl+C to stop
+scripts/stop.sh         # from another terminal; add --db to stop the database container too
+scripts/build.sh        # checks + production build
+```
+
+- Configuration order: environment > `.env` > `.env.example`. `.env` is **parsed, never sourced**: only
+  `KEY=value` lines with an upper-case name are read, one layer of matching quotes is removed, and values are
+  taken literally (no `$` expansion, backticks or `$(...)`).
+- Secrets are never printed: `dev.sh` shows variable names and hosts, with URL passwords masked as `***`.
+- `LOCALETL_DATA_DIR` defaults to `./data` relative to the repository root (made absolute for the API and worker).
+- PID file: `.localetl/dev.pids` (one `PID<TAB>role<TAB>command-fragment` line per process); logs in `.localetl/logs/`.
+  `stop.sh` verifies each PID (alive, yours, command line still matches) before signalling; it never uses `pkill`/`killall`
+  and never deletes volumes, data or `.env`.
+- `dev.sh` refuses to start if recorded processes are alive or ports 8000/5173 are in use.
+- `frontend/dist/` is static assets. `vite dev` and `vite preview` are not deployments.
