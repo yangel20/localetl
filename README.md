@@ -4,7 +4,8 @@ Local-first ETL web application. Upload CSV files, configure cleaning and valida
 results into PostgreSQL, run and monitor jobs, and explore the published datasets with charts. Everything
 runs on your machine; nothing is sent to external services.
 
-
+## Demo
+[▶ Watch the LocalETL demo](https://youtu.be/aswGu47Qza4)
 
 # LocalETL — Product Specification
 
