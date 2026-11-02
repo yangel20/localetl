@@ -4,6 +4,215 @@ Local-first ETL web application. Upload CSV files, configure cleaning and valida
 results into PostgreSQL, run and monitor jobs, and explore the published datasets with charts. Everything
 runs on your machine; nothing is sent to external services.
 
+
+
+# LocalETL — Product Specification
+
+## 1. About Me (the User)
+
+I'm a Computer Science student at Lehman College interested in becoming a Data Engineer. I have experience with Python, SQL, PostgreSQL, and ETL pipelines through internships and personal projects.
+
+I built **LocalETL** to learn more about the Extract, Transform, Load (ETL) process and better understand how data moves through a pipeline.
+
+I use LocalETL to upload CSV files, inspect datasets, clean messy data, convert data types, and load processed records into PostgreSQL.
+
+The initial MVP took approximately **4 days to build**.
+
+### The Last 3 Times This Happened
+
+*These are representative examples based on my development experience, not three confirmed incidents.*
+
+1. **Working with CSV files:** I needed to inspect columns, identify missing values, and clean records. I used Python scripts and manually inspected the output, making the process repetitive.
+
+2. **Learning ETL pipelines:** I wanted to understand how extraction, transformation, validation, and loading work together. Reading individual scripts didn't always make the complete process clear.
+
+3. **Testing data transformations:** I needed to convert strings into integers or floats and validate records. I had to run scripts and manually inspect the results to verify that the conversions worked.
+
+### What It Costs Me
+
+- ⏱️ **Time:** Repeatedly writing Python scripts and inspecting CSV files. Exact time spent per dataset has not been measured.
+- 💸 **Money:** No significant direct cost. I use open-source technologies on my local computer.
+- 🔋 **Energy:** Debugging scripts, checking database records, and switching between different environments requires extra effort.
+- 🙂 **Joy:** I enjoy data engineering, but repetitive tasks take time away from learning new concepts.
+
+---
+
+## 2. Problem Statement
+
+### Gut Check
+
+> I need **a simpler way to clean and process CSV files** because **I want to understand ETL workflows without repeatedly writing the same processing code**.
+
+### Five Whys
+
+1. **Why do I need a simpler way to process CSV files?**
+   - Because I frequently need to inspect, clean, and prepare datasets.
+
+2. **Why is preparing datasets difficult?**
+   - Because datasets can contain missing values, inconsistent data types, and invalid records.
+
+3. **Why does that slow me down?**
+   - Because I need to write Python scripts and manually review their results.
+
+4. **Why am I repeatedly writing similar code?**
+   - Because I don't have a reusable process connecting every ETL stage.
+
+5. **Why do I need a reusable process?**
+   - Because I want to understand how raw data becomes reliable, structured information while improving my data engineering skills.
+
+### Problem Statement
+
+> **When** I work with a new CSV dataset, **I struggle to** clean, validate, and convert its records into structured data without repeating manual steps, **which costs me** additional development time and mental effort. **This happens because** each dataset requires multiple processing steps that are difficult to manage consistently. **Right now I** write Python scripts and inspect results manually, **but** this makes it difficult to understand the complete ETL process and reuse previous work.
+
+### I'll Know This Is Solved When
+
+I can upload a CSV file, define cleaning and validation rules, execute the ETL process, and inspect the processed records in PostgreSQL.
+
+I should also be able to explain each processing stage and understand why particular records were rejected.
+
+---
+
+## 3. Existing Solutions
+
+| What I Use or Tried | What It Does Well | Why It Falls Short for Me |
+|---|---|---|
+| Python and Pandas | Flexible data cleaning and transformations | Requires writing and debugging scripts |
+| PostgreSQL and SQL | Stores and queries structured data | Doesn't independently manage the complete ETL process |
+| Manual CSV inspection | Makes it easy to inspect raw data | Becomes inefficient with larger or more complex datasets |
+
+### The Gap
+
+I need a reusable local workflow that helps me understand and execute each ETL stage while making results and errors easy to inspect.
+
+---
+
+## 4. Features & Benefits
+
+| Feature (What It Does) | Benefit (How My Life Gets Better) | MVP or Later? |
+|---|---|---|
+| CSV upload and preview | Inspect datasets before processing | MVP |
+| Data cleaning and type conversion | Convert strings to integers/floats, handle nulls, and clean records | MVP |
+| Pipeline execution and results | Execute ETL workflows and inspect successful or rejected records | MVP |
+| Dataset explorer and charts | Explore processed data and visualize results | Later — implemented |
+| Advanced transformations | Handle more complex data-cleaning scenarios | Later |
+| Detailed performance metrics | Better understand pipeline performance | Later |
+
+### MVP (2–3 Features)
+
+1. **CSV Upload and Preview**
+   - Upload CSV files.
+   - Inspect columns and sample records.
+
+2. **Data Cleaning and Transformations**
+   - Convert strings into integers and floats.
+   - Handle missing values.
+   - Remove duplicates.
+   - Apply validation rules.
+
+3. **Pipeline Execution**
+   - Run an ETL pipeline.
+   - Load processed data into PostgreSQL.
+   - Inspect execution results and rejected records.
+
+### Later
+
+- Additional transformation operations.
+- More advanced data-cleaning rules.
+- Expanded dataset visualizations.
+- Detailed debugging and performance analysis.
+- Support for additional file formats.
+
+### Not Doing
+
+- Public online hosting.
+- Multi-user accounts or authentication.
+- Paid subscriptions.
+- Cloud infrastructure.
+- Enterprise-scale distributed processing.
+
+LocalETL is a **personal learning project** that runs on my computer.
+
+---
+
+## 5. Technology Stack
+
+### Front End
+
+- **Surface:** Local web application
+- **Tools:** React, TypeScript, Vite, Tailwind CSS, Recharts
+- **Why:** A visual interface allows me to upload CSV files, configure transformations, run pipelines, and inspect results without relying entirely on terminal commands.
+
+### Back End
+
+| Piece | Choice | Why |
+|---|---|---|
+| Server / API | Python, FastAPI, Pydantic | Provides REST endpoints and validates requests |
+| ETL Processing | Python, Pandas | Extracts, transforms, cleans, and validates data |
+| Background Execution | Python worker | Executes queued pipelines separately from API requests |
+| Data Storage | PostgreSQL 16 | Stores pipeline configurations, execution metadata, and processed datasets |
+| Database Management | SQLAlchemy, Alembic | Handles database operations and schema migrations |
+| Outside Services | None required | Keeps the project self-contained |
+| Hosting / Deploy | Local computer, Docker Compose | Runs locally without cloud infrastructure |
+| Testing | Pytest, Vitest, Playwright | Tests backend logic, frontend behavior, and end-to-end workflows |
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    A["User"] --> B["React Frontend"]
+    B --> C["FastAPI Backend"]
+    C --> D[("PostgreSQL")]
+    C --> E["Local CSV Storage"]
+    D --> F["Background Worker"]
+    F --> G["ETL Engine"]
+    E --> G
+    G --> D
+    D --> C
+    C --> B
+```
+
+### Data Flow
+
+1. User uploads a CSV file.
+2. FastAPI stores the source file and metadata.
+3. User configures transformations and validation rules.
+4. Backend creates a queued pipeline run.
+5. Background worker claims and executes the run.
+6. ETL engine extracts, transforms, and validates the data.
+7. Processed records are loaded into PostgreSQL.
+8. Frontend displays execution results, datasets, and charts.
+
+---
+
+## 6. Project Goal
+
+My goal is to understand how ETL systems work by designing and developing one myself.
+
+Through LocalETL, I am learning:
+
+- ETL pipeline architecture.
+- Python data processing.
+- Data cleaning and type conversion.
+- PostgreSQL database design.
+- REST API development.
+- Background job execution.
+- Data validation and quality assurance.
+- Full-stack development.
+
+### Success Criteria
+
+LocalETL is successful when I can:
+
+- Upload a CSV file.
+- Configure cleaning and transformation rules.
+- Execute a complete ETL pipeline.
+- Store the resulting data in PostgreSQL.
+- Inspect processed and rejected records.
+- Explain how the data moved through each ETL stage.
+
+**The goal is learning and practical experience, not commercial deployment.**
+
+
 ## Features (MVP)
 
 - **CSV upload and preview**: one file at a time (default limit 100 MB); `utf-8`, `utf-8-sig`, `latin-1`,
